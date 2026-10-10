@@ -96,7 +96,10 @@ function JobEditor({ job, onDone, onCancel }: { job?: Job; onDone: () => Promise
   const [privateAddress, setPrivateAddress] = useState(job?.private_address ?? ''); const [contactDetails, setContactDetails] = useState(job?.contact_details ?? '')
   const [saving, setSaving] = useState(false); const [error, setError] = useState('')
   async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); const lifecycle = new FormData(event.currentTarget).get('intent') === 'open' ? 'open' : 'draft'; setSaving(true); setError('')
+    // FormData(form) does not include the submitter. Read it from the native
+    // submit event so the Publish now button cannot accidentally save a draft.
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null
+    event.preventDefault(); const lifecycle = submitter?.value === 'open' ? 'open' : 'draft'; setSaving(true); setError('')
     try {
       const values = { title: title.trim(), description: description.trim(), category, location: location.trim(), private_address: privateAddress.trim(), contact_details: contactDetails.trim() }
       const changes = job ? await x('update_job', { id: job.id, ...values }) : await x('create_job', { id: crypto.randomUUID(), lifecycle, ...values })
