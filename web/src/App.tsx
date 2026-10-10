@@ -60,7 +60,7 @@ export function useRoute(): Route {
       browse: 'Browse', listing: 'Listing', saved: 'Saved', requests: `My ${REQUEST.plural}`, inbox: 'Inbox',
       mine: 'My listings', new: 'New listing', edit: 'Edit listing', messages: 'Messages', thread: 'Conversation', settings: 'Settings',
     }
-    document.title = `${titles[route.name]} — APPNAME`
+    document.title = `${titles[route.name]} — tradies`
     window.scrollTo(0, 0)
   }, [route])
   return route
@@ -87,7 +87,7 @@ export default function App() {
   }
 
   return (
-    <ProShell app={app} appName="APPNAME" nav={NAV} renderNav={({ items }) => <HashNav items={items} />}>
+    <ProShell app={app} appName="tradies" nav={NAV} renderNav={({ items }) => <HashNav items={items} />}>
       <div className="flex-1"><Page route={route} /></div>
     </ProShell>
   )
@@ -138,7 +138,7 @@ function Header({ right }: { right: ReactNode }) {
     <header className="sticky top-0 z-10 border-b border-[var(--line)] bg-[var(--panel-strong)] backdrop-blur">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:rounded focus:bg-[var(--paper)] focus:px-2 focus:py-1">Skip to content</a>
       <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3 sm:px-6">
-        <a href="#/" className="display-font text-lg font-bold text-[var(--ink)]">APPNAME</a>
+        <a href="#/" className="display-font text-lg font-bold text-[var(--ink)]">tradies</a>
         <HashNav items={[{ label: 'Browse', href: '#/' }]} />
         <div className="flex items-center gap-2">{right}</div>
       </div>

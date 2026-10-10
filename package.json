@@ -1,17 +1,17 @@
 {
-  "name": "APPNAME",
+  "name": "tradies",
   "private": true,
   "packageManager": "pnpm@10.30.3",
   "engines": { "node": ">=22" },
   "pnpm": { "onlyBuiltDependencies": ["esbuild"] },
   "scripts": {
-    "dev": "pnpm --filter @APPNAME/web dev",
+    "dev": "pnpm --filter @tradies/web dev",
     "prebuild": "npx -y @proappstore/cli@latest check",
-    "build": "pnpm --filter @APPNAME/web build",
-    "preview": "pnpm --filter @APPNAME/web preview",
+    "build": "pnpm --filter @tradies/web build",
+    "preview": "pnpm --filter @tradies/web preview",
     "lint": "echo 'Lint configured per app; extend lintstagedrc.json with eslint/prettier'",
-    "typecheck": "pnpm --filter @APPNAME/web exec tsc -b",
-    "test": "pnpm --filter @APPNAME/web exec tsc -b && node --no-warnings qa/actions.mjs",
+    "typecheck": "pnpm --filter @tradies/web exec tsc -b",
+    "test": "pnpm --filter @tradies/web exec tsc -b && node --no-warnings qa/actions.mjs",
     "prepare": "husky install"
   },
   "devDependencies": {

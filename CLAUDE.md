@@ -1,10 +1,10 @@
-# APPNAME (Pro)
+# tradies (Pro)
 
 A Pro app on ProAppStore, built from `template-marketplace`: a two-sided listings
 marketplace — public catalogue, owner-scoped listings, favourites, requests with a guarded
 lifecycle, pair messaging, reviews after completion, blocks and reports.
 
-- Subdomain: `APPNAME.proappstore.online`
+- Subdomain: `tradies.proappstore.online`
 - Dev: `pnpm install && pnpm dev`
 - Test: `pnpm test` (typecheck + `qa/actions.mjs`, the negative tests per scoped action)
 - Build: `pnpm build` (runs the platform compliance check via prebuild)

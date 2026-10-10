@@ -35,9 +35,9 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'APPNAME — ProAppStore',
-        short_name: 'APPNAME',
-        description: 'APPNAME on ProAppStore',
+        name: 'tradies — ProAppStore',
+        short_name: 'tradies',
+        description: 'tradies on ProAppStore',
         start_url: '/',
         scope: '/',
         display: 'standalone',

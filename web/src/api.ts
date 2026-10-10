@@ -2,7 +2,7 @@ import { initPro } from '@proappstore/sdk'
 
 // platform-cookie is the current auth mode (PAS-AUTH-001): the host sets the session
 // cookie and data calls go through /.pas/data on the app's own origin.
-export const app = initPro({ appId: 'APPNAME', authMode: 'platform-cookie' })
+export const app = initPro({ appId: 'tradies', authMode: 'platform-cookie' })
 
 /**
  * Extension points. The archetype is "owners publish listings, seekers request them";

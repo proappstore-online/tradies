@@ -37,7 +37,7 @@
     "status": "reviewed",
     "reviewed_at": "2026-09-25",
     "known_deviations": [],
-    "notes": "Static audit at staging (a268bee, #191): pas check passes every hard check once APPNAME is replaced (re-run 2026-09-28; in the template itself only the placeholder check fails, by design); the manifest registers through the platform's own validation (manifest rules, PAS-DATA-011 public-tool rules, :__user_id scoping, schema coherence) and the migrations pass the additive-only lint (test/template-marketplace.test.ts). Five public reads name their columns and never expose a reviewer's id; every other statement is scoped to the owner, requester or message pair, transitions are guarded in SQL, and blocks are enforced in SQL. Fixes the base template's three known deviations (PAS-AUTH-001, PAS-UI-002, PAS-UI-007)."
+    "notes": "Static audit at staging (a268bee, #191): pas check passes every hard check once tradies is replaced (re-run 2026-09-28; in the template itself only the placeholder check fails, by design); the manifest registers through the platform's own validation (manifest rules, PAS-DATA-011 public-tool rules, :__user_id scoping, schema coherence) and the migrations pass the additive-only lint (test/template-marketplace.test.ts). Five public reads name their columns and never expose a reviewer's id; every other statement is scoped to the owner, requester or message pair, transitions are guarded in SQL, and blocks are enforced in SQL. Fixes the base template's three known deviations (PAS-AUTH-001, PAS-UI-002, PAS-UI-007)."
   },
   "maintainer": {
     "org": "proappstore-online",
