@@ -7,6 +7,7 @@ import { expect, test, type Browser, type BrowserContext, type Page, type Reques
  */
 type Role = 'customer' | 'tradie' | 'rivalTradie' | 'outsider'
 type User = { id: string; login: string; name: string }
+type PublicListing = { id: string; owner_id: string; owner_name: string; status: 'active' | 'paused'; title: string; description: string; category: string; location: string; lat: number | null; lng: number | null; images: string; created_at: number; updated_at: number }
 type Job = { id: string; lifecycle: 'draft' | 'open' | 'closed'; title: string; description: string; category: string; location: string; private_address?: string; contact_details?: string; created_at: number; updated_at: number; owner_id: string }
 type Quote = { id: string; target_type: 'job' | 'request'; target_id: string; status: 'submitted' | 'accepted' | 'declined'; scope: string; amount: number; currency: string; timing: string; valid_until: number | null; notes: string; revision: number; created_at: number; updated_at: number; accepted_at: number | null; tradie_id: string }
 type Request = { id: string; listing_id: string; requester_id: string; requester_name: string; status: 'pending' | 'accepted' | 'completed'; note: string; created_at: number; updated_at: number; listing_title: string; owner_id: string; owner_name: string }
@@ -29,7 +30,8 @@ function seed() {
     requests: [] as Request[],
     messages: [] as WorkMessage[],
     agreements: [] as Agreement[],
-    listing: { id: 'listing-1', owner_id: users.tradie.id, owner_name: users.tradie.name, status: 'active', title: 'Taylor Plumbing', description: 'Licensed plumbing repairs and installations.', category: 'plumber', location: 'Melbourne', lat: null, lng: null, images: '[]', created_at: now, updated_at: now },
+    listing: { id: 'listing-1', owner_id: users.tradie.id, owner_name: users.tradie.name, status: 'active', title: 'Taylor Plumbing', description: 'Licensed plumbing repairs and installations.', category: 'plumber', location: 'Melbourne', lat: null, lng: null, images: '[]', created_at: now, updated_at: now } as PublicListing,
+    providerListings: [] as PublicListing[],
     delayDirectory: false,
     failJobs: false,
   }
@@ -81,12 +83,16 @@ async function mockedContext(browser: Browser, role: Role, store: Store): Promis
       const quote = selectedQuote(store, targetType, id)
       return !!quote && (quote.tradie_id === currentUser.id || isOwner(targetType, id))
     }
+    const quoteForCustomer = (quote: Quote) => {
+      const listing = [store.listing, ...store.providerListings].find((item) => item.owner_id === quote.tradie_id && item.status === 'active')
+      return { ...quote, provider_user_id: quote.tradie_id, provider_trade_category: 'plumber', provider_profile_id: listing?.id ?? null, provider_display_name: listing?.title ?? null, provider_has_listing: listing ? 1 : 0 }
+    }
 
     switch (action) {
       case 'list_listings':
         if (store.delayDirectory) await new Promise((resolve) => setTimeout(resolve, 700))
-        return json(rows([store.listing]))
-      case 'get_listing': return json(rows(String(params.id) === store.listing.id ? [store.listing] : []))
+        return json(rows([store.listing, ...store.providerListings].filter((listing) => listing.status === 'active')))
+      case 'get_listing': return json(rows([store.listing, ...store.providerListings].filter((listing) => String(params.id) === listing.id && listing.status === 'active')))
       case 'list_reviews': return json(rows([]))
       case 'listing_stats': return json(rows([{ review_count: 0, avg_rating: null }]))
       case 'list_my_favorite_ids': case 'list_my_favorites': return json(rows([]))
@@ -112,7 +118,7 @@ async function mockedContext(browser: Browser, role: Role, store: Store): Promis
         return json(changes())
       }
       case 'list_my_quotes': return json(rows(store.quotes.filter((quote) => quote.tradie_id === currentUser.id)))
-      case 'list_job_quotes': return json(rows(isOwner('job', String(params.job_id)) ? store.quotes.filter((quote) => quote.target_type === 'job' && quote.target_id === params.job_id) : []))
+      case 'list_job_quotes': return json(rows(isOwner('job', String(params.job_id)) ? store.quotes.filter((quote) => quote.target_type === 'job' && quote.target_id === params.job_id).map(quoteForCustomer) : []))
       case 'revise_quote': {
         const quote = store.quotes.find((item) => item.id === params.id)
         if (!quote || quote.tradie_id !== currentUser.id || quote.status !== 'submitted' || Number(params.expected_revision) !== quote.revision) return json(changes(0))
@@ -138,7 +144,7 @@ async function mockedContext(browser: Browser, role: Role, store: Store): Promis
         store.quotes.push({ id: String(params.id), target_type: 'request', target_id: requestRow.id, status: 'submitted', scope: String(params.scope), amount: Number(params.amount), currency: String(params.currency), timing: String(params.timing), valid_until: params.valid_until ? Number(params.valid_until) : null, notes: String(params.notes ?? ''), revision: 1, created_at: now, updated_at: now, accepted_at: null, tradie_id: currentUser.id })
         return json(changes())
       }
-      case 'list_request_quotes': return json(rows(isOwner('request', String(params.request_id)) ? store.quotes.filter((quote) => quote.target_type === 'request' && quote.target_id === params.request_id) : []))
+      case 'list_request_quotes': return json(rows(isOwner('request', String(params.request_id)) ? store.quotes.filter((quote) => quote.target_type === 'request' && quote.target_id === params.request_id).map(quoteForCustomer) : []))
       case 'list_work_conversations': {
         const result = store.quotes.filter((quote) => quote.status === 'accepted' && (quote.tradie_id === currentUser.id || isOwner(quote.target_type, quote.target_id))).map((quote) => ({ target_type: quote.target_type, target_id: quote.target_id, quote_id: quote.id, title: quote.target_type === 'job' ? store.jobs.find((job) => job.id === quote.target_id)?.title : store.requests.find((item) => item.id === quote.target_id)?.listing_title, other_id: quote.tradie_id === currentUser.id ? targetOwner(store, quote.target_type, quote.target_id) : quote.tradie_id, other_name: quote.tradie_id === currentUser.id ? users.customer.name : users.tradie.name, last_at: now }))
         return json(rows(result))
@@ -227,12 +233,30 @@ test('directory direct enquiry reaches tradie quote and agreement flow without a
   await fillQuote(tradie.page, '240')
   const request = store.requests[0]!
   await customer.page.goto('/#/quotes')
-  await expect(customer.page.getByText('Taylor Plumbing', { exact: true })).toBeVisible()
+  await expect(customer.page.getByRole('link', { name: 'Taylor Plumbing' })).toHaveAttribute('href', '#/l/listing-1')
   await customer.page.getByRole('button', { name: 'Accept quote' }).click()
   await customer.page.goto(`/#/work/request/${request.id}/${users.tradie.id}`)
   await customer.page.getByRole('button', { name: 'Agree to work' }).click()
   await expect(customer.page.getByText('Work status: agreed')).toBeVisible()
   await customer.context.close(); await tradie.context.close()
+})
+
+test('customer sees distinct published provider labels and profile links before selecting a quote', async ({ browser }) => {
+  const store = seed()
+  store.providerListings.push({ id: 'rival-listing', owner_id: users.rivalTradie.id, owner_name: users.rivalTradie.name, status: 'active', title: 'Riley Plumbing', description: 'Emergency and scheduled plumbing.', category: 'plumber', location: 'Melbourne', lat: null, lng: null, images: '[]', created_at: now, updated_at: now })
+  store.jobs.push({ id: 'comparison-job', lifecycle: 'open', title: 'Compare two providers', description: 'Customer needs two distinct quotes.', category: 'plumber', location: 'Melbourne', owner_id: users.customer.id, created_at: now, updated_at: now })
+  store.quotes.push(
+    { id: 'taylor-quote', target_type: 'job', target_id: 'comparison-job', status: 'submitted', scope: 'Taylor quote scope', amount: 300, currency: 'AUD', timing: 'Tomorrow', valid_until: null, notes: '', revision: 1, created_at: now, updated_at: now, accepted_at: null, tradie_id: users.tradie.id },
+    { id: 'riley-quote', target_type: 'job', target_id: 'comparison-job', status: 'submitted', scope: 'Riley quote scope', amount: 280, currency: 'AUD', timing: 'Friday', valid_until: null, notes: '', revision: 1, created_at: now, updated_at: now, accepted_at: null, tradie_id: users.rivalTradie.id },
+  )
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/quotes')
+  await expect(customer.page.getByText('From: Taylor Plumbing · plumber tradie')).toBeVisible()
+  await expect(customer.page.getByText('From: Riley Plumbing · plumber tradie')).toBeVisible()
+  await expect(customer.page.getByRole('link', { name: 'Taylor Plumbing' })).toHaveAttribute('href', '#/l/listing-1')
+  await expect(customer.page.getByRole('link', { name: 'Riley Plumbing' })).toHaveAttribute('href', '#/l/rival-listing')
+  await expect(customer.page.getByRole('button', { name: 'Accept quote' })).toHaveCount(2)
+  await customer.context.close()
 })
 
 test('customer cannot accept an unseen revised quote and is shown its latest terms', async ({ browser }) => {

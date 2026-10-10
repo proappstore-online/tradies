@@ -71,6 +71,12 @@ export interface Quote {
   created_at: number
   updated_at: number
   accepted_at: number | null
+  /** Present when a customer lists quotes, sourced from the provider's server-side profile. */
+  provider_user_id: string
+  provider_trade_category: string
+  provider_profile_id: string | null
+  provider_display_name: string | null
+  provider_has_listing: 0 | 1
 }
 
 export interface Request {
