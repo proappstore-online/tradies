@@ -42,11 +42,15 @@ export interface Profile {
 
 export interface Job {
   id: string
-  status: 'open' | 'closed'
+  lifecycle: 'draft' | 'open' | 'closed'
   title: string
   description: string
   category: string
   location: string
+  /** Present only on the customer-owner `get_my_job` action. */
+  private_address?: string
+  /** Present only on the customer-owner `get_my_job` action. */
+  contact_details?: string
   created_at: number
   updated_at: number
 }

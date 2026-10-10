@@ -8,7 +8,7 @@ import { MyRequests, Inbox } from './pages/Requests'
 import { OwnerDashboard, ListingForm } from './pages/Owner'
 import { Conversations, Thread } from './pages/Messages'
 import { Settings } from './pages/Settings'
-import { Jobs } from './pages/Jobs'
+import { JobDetail, Jobs } from './pages/Jobs'
 
 /**
  * Hash routes. Public: browse and listing detail (rendered without a session through
@@ -17,6 +17,7 @@ import { Jobs } from './pages/Jobs'
 export type Route =
   | { name: 'browse' }
   | { name: 'jobs' }
+  | { name: 'job'; id: string }
   | { name: 'listing'; id: string }
   | { name: 'saved' }
   | { name: 'requests' }
@@ -29,12 +30,14 @@ export type Route =
   | { name: 'thread'; listingId: string; otherId: string }
   | { name: 'settings' }
 
-const PUBLIC = new Set<Route['name']>(['browse', 'listing', 'jobs'])
+const PUBLIC = new Set<Route['name']>(['browse', 'listing', 'jobs', 'job'])
 
 function parseHash(): Route {
   const h = location.hash
   let m = h.match(/^#\/l\/([\w:-]+)$/)
   if (m) return { name: 'listing', id: m[1]! }
+  m = h.match(/^#\/jobs\/([\w:-]+)$/)
+  if (m) return { name: 'job', id: m[1]! }
   m = h.match(/^#\/mine\/([\w:-]+)\/edit$/)
   if (m) return { name: 'edit', id: m[1]! }
   m = h.match(/^#\/messages\/([\w:-]+)\/([\w:.@-]+)$/)
@@ -62,7 +65,7 @@ export function useRoute(): Route {
   }, [])
   useEffect(() => {
     const titles: Record<Route['name'], string> = {
-      browse: 'Directory', jobs: 'Jobs', listing: 'Tradie', saved: 'Saved', requests: `My ${REQUEST.plural}`, quotes: 'Quotes', inbox: 'Inbox',
+      browse: 'Directory', jobs: 'Jobs', job: 'Job', listing: 'Tradie', saved: 'Saved', requests: `My ${REQUEST.plural}`, quotes: 'Quotes', inbox: 'Inbox',
       mine: 'My trade profile', new: 'Add service', edit: 'Edit service', messages: 'Inbox', thread: 'Conversation', settings: 'Settings',
     }
     document.title = `${titles[route.name]} — Tradies`
@@ -119,6 +122,7 @@ function Page({ route }: { route: Route }) {
   switch (route.name) {
     case 'browse': return <Browse />
     case 'jobs': return <Jobs />
+    case 'job': return <JobDetail id={route.id} />
     case 'listing': return <ListingPage id={route.id} />
     case 'saved': return <Saved />
     case 'requests': return <MyRequests />

@@ -21,8 +21,8 @@ only role and a tradie's primary trade category, never contact information.
 
 Public directory and job actions name their columns and use literal limits. They never
 return a customer id, customer name, address, contact details, enquiry, quote, or message.
-Jobs collect a broad service area only. Exact work details and contact information belong in
-participant-scoped enquiries/messages. Customer-to-tradie enquiries require the expected
+Jobs publish a broad service area only; their precise address and contact preference are
+owner-private until an explicit participant relationship authorises disclosure. Customer-to-tradie enquiries require the expected
 roles and reject blocked pairs in SQL; messaging retains the template's SQL block guard.
 
 ## Product boundary for this increment
@@ -41,3 +41,19 @@ be used as an open public-message relay. Quote negotiation and richer job respon
 issue work. Tradies does not publish licence, verification, review, price, payment, checkout,
 escrow, or billing claims. Existing template review records are only available after a completed,
 participant-scoped enquiry and are never fabricated.
+
+## Customer jobs and lead privacy
+
+`0008_job_lifecycle_and_private_details` extends the initial jobs foundation without
+rewriting an applied migration. Jobs use a **draft**, **open**, or **closed** lifecycle.
+The legacy `status` remains a publication gate: only an open lifecycle has
+`status = 'open'`, so public actions have a defensive double condition and drafts/closed
+jobs cannot become leads through an old query.
+
+Customers create and edit their own draft/open jobs and make guarded transitions
+`draft → open → closed`, with closed jobs allowed to re-open. Public job actions select
+only the job id, work description, trade, broad area and timestamps. Precise address and
+contact preference are stored with the job but selected only by the customer-owner action;
+they are never shared merely because a tradie can browse a job. A later quote/conversation
+increment may add an explicit participant authorisation relationship before sharing those
+private values with a tradie.

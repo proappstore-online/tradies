@@ -79,7 +79,7 @@ for (const t of Object.values(TOOLS).filter((t) => t.requires_auth !== false)) {
   ok(denied, `${t.name}: requires an authenticated caller`)
 }
 
-// --- Roles and public jobs ------------------------------------------------------------------
+// --- Roles and customer jobs ---------------------------------------------------------------
 ok(call('create_profile', OWNER, { role: 'tradie', trade_category: 'plumber' }) === 1, 'owner chooses the tradie role')
 ok(call('create_profile', OWNER, { role: 'customer' }) === 0, 'role selection is immutable and idempotent')
 ok(call('create_profile', SEEKER, { role: 'customer' }) === 1, 'seeker chooses the customer role')
@@ -88,12 +88,24 @@ ok(call('create_profile', 'gh:invalid', { role: 'tradie' }) === 0, 'a tradie can
 ok(call('get_my_profile', STRANGER)[0]?.role === 'customer' && call('get_my_profile', STRANGER)[0]?.user_id === STRANGER, 'a caller only reads their own role')
 ok(call('create_job', OWNER, { id: 'job-owner', title: 'Nope', category: 'plumber' }) === 0, 'a tradie cannot post a customer job')
 ok(call('create_listing', SEEKER, { id: 'customer-service', owner_name: 'Sam', title: 'Not a tradie', category: 'plumber' }) === 0, 'a customer cannot publish a tradie service')
-ok(call('create_job', SEEKER, { id: 'job-1', title: 'Fix tap', description: 'Kitchen tap', category: 'plumber', location: 'Northside' }) === 1, 'customer posts a public job')
-ok(call('create_job', SEEKER, { id: 'job-1', title: 'Retry', category: 'plumber' }) === 0, 'create_job is idempotent by client id')
-ok(!('customer_id' in (call('list_jobs', null)[0] ?? {})), 'public jobs never expose the customer id or contact data')
+ok(call('create_job', SEEKER, { id: 'job-1', title: 'Fix tap', description: 'Kitchen tap is leaking.', category: 'plumber', location: 'Northside', private_address: '12 Private Lane', contact_details: 'Sam, 0400 000 000' }) === 1, 'customer saves a validated draft with private details')
+ok(call('create_job', SEEKER, { id: 'job-1', title: 'Retry', description: 'Retry', category: 'plumber', location: 'Northside' }) === 0, 'create_job is idempotent by client id')
+ok(call('list_jobs', null).length === 0 && call('get_job', null, { id: 'job-1' }).length === 0, 'draft jobs are never public leads')
+const ownDraft = call('get_my_job', SEEKER, { id: 'job-1' })[0]
+ok(ownDraft?.private_address === '12 Private Lane' && ownDraft?.contact_details === 'Sam, 0400 000 000', 'only the customer owner reads precise address and contact data')
+ok(call('get_my_job', OWNER, { id: 'job-1' }).length === 0 && call('get_my_job', STRANGER, { id: 'job-1' }).length === 0, 'tradies and other customers cannot read job private details')
+ok(call('update_job', STRANGER, { id: 'job-1', title: 'Hijacked', description: 'No', category: 'plumber', location: 'Northside' }) === 0, 'a non-owner cannot edit a customer job')
+ok(call('update_job', SEEKER, { id: 'job-1', title: 'Repair leaking kitchen tap', description: 'Kitchen tap is leaking and needs repair.', category: 'plumber', location: 'Northside', private_address: '12 Private Lane', contact_details: 'Message first' }) === 1, 'owner edits a draft with validation')
+ok(call('set_job_status', SEEKER, { id: 'job-1', from: 'draft', to: 'open' }) === 1, 'owner publishes a draft job')
+const publicJob = call('get_job', null, { id: 'job-1' })[0]
+ok(publicJob?.lifecycle === 'open' && !('customer_id' in publicJob) && !('private_address' in publicJob) && !('contact_details' in publicJob), 'public job detail exposes only safe lead fields')
+ok(call('list_jobs', null, { category: 'plumber', location: 'north' }).length === 1 && call('list_jobs', null, { category: 'electrician', location: 'north' }).length === 0, 'tradies can filter open jobs by trade and broad area')
 ok(call('list_my_jobs', STRANGER).length === 0, 'a stranger sees none of another customer’s jobs')
 ok(call('set_job_status', STRANGER, { id: 'job-1', from: 'open', to: 'closed' }) === 0, 'a stranger cannot close a customer job')
-ok(call('set_job_status', SEEKER, { id: 'job-1', from: 'closed', to: 'open' }) === 0, 'a stale job status changes nothing')
+ok(call('set_job_status', SEEKER, { id: 'job-1', from: 'open', to: 'draft' }) === 0, 'invalid lifecycle transitions are refused')
+ok(call('set_job_status', SEEKER, { id: 'job-1', from: 'open', to: 'closed' }) === 1 && call('get_job', null, { id: 'job-1' }).length === 0, 'closed jobs are removed from public leads')
+ok(call('update_job', SEEKER, { id: 'job-1', title: 'Too late', description: 'No', category: 'plumber', location: 'Northside' }) === 0, 'closed jobs cannot be edited until re-opened')
+ok(call('set_job_status', SEEKER, { id: 'job-1', from: 'closed', to: 'open' }) === 1 && call('get_job', null, { id: 'job-1' }).length === 1, 'owner can re-open a closed job')
 
 // --- Listings -------------------------------------------------------------------------------
 ok(call('create_listing', OWNER, { id: 'invalid-service', owner_name: 'Olive', title: 'Missing details', category: 'plumber' }) === 0, 'a profile needs a trade, service area and description')

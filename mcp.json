@@ -490,31 +490,62 @@
     },
     {
       "name": "list_jobs",
-      "description": "Public job board, newest open jobs first. Contains only job details and broad location; it never returns customer id, name, address, contact details or private enquiry data.",
+      "description": "Public job board, newest open jobs first. It exposes only the work summary, trade and broad service area — never a customer id, name, precise address, contact details or private participant data.",
       "operation": "query",
-      "sql": "SELECT id, status, title, description, category, location, created_at, updated_at FROM jobs WHERE status = 'open' AND (:category IS NULL OR category = :category) ORDER BY created_at DESC LIMIT 50",
+      "sql": "SELECT id, lifecycle, title, description, category, location, created_at, updated_at FROM jobs WHERE status = 'open' AND lifecycle = 'open' AND (:category IS NULL OR category = :category) AND (:location IS NULL OR lower(location) LIKE '%' || lower(:location) || '%') ORDER BY created_at DESC LIMIT 50",
       "params": {
         "category": {
           "type": "string",
           "description": "Filter by trade category",
+          "optional": true
+        },
+        "location": {
+          "type": "string",
+          "description": "Filter by broad service area substring",
           "optional": true
         }
       },
       "requires_auth": false
     },
     {
-      "name": "list_my_jobs",
-      "description": "The caller's own jobs in every status, newest first.",
+      "name": "get_job",
+      "description": "Public detail for one open job. Only privacy-safe lead fields are returned; drafts and closed jobs are not public.",
       "operation": "query",
-      "sql": "SELECT id, status, title, description, category, location, created_at, updated_at FROM jobs WHERE customer_id = :__user_id ORDER BY created_at DESC LIMIT 200",
+      "sql": "SELECT id, lifecycle, title, description, category, location, created_at, updated_at FROM jobs WHERE id = :id AND status = 'open' AND lifecycle = 'open' LIMIT 1",
+      "params": {
+        "id": {
+          "type": "string",
+          "description": "Job id"
+        }
+      },
+      "requires_auth": false
+    },
+    {
+      "name": "list_my_jobs",
+      "description": "The customer caller's own jobs in every lifecycle, newest first. Private address and contact details remain on the single-job owner action.",
+      "operation": "query",
+      "sql": "SELECT id, lifecycle, title, description, category, location, created_at, updated_at FROM jobs WHERE customer_id = :__user_id AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'customer') ORDER BY created_at DESC LIMIT 200",
       "params": {},
       "requires_auth": true
     },
     {
+      "name": "get_my_job",
+      "description": "The customer owner's complete job, including the precise address and contact details they supplied. No other caller can read it.",
+      "operation": "query",
+      "sql": "SELECT id, lifecycle, title, description, category, location, private_address, contact_details, created_at, updated_at FROM jobs WHERE id = :id AND customer_id = :__user_id AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'customer') LIMIT 1",
+      "params": {
+        "id": {
+          "type": "string",
+          "description": "Job id"
+        }
+      },
+      "requires_auth": true
+    },
+    {
       "name": "create_job",
-      "description": "Post a public job as a customer. The client supplies the id and retries are ignored. Exact addresses and contact details are intentionally not collected here.",
+      "description": "Create a customer-owned draft or open job. The client supplies the id and retries are ignored. Precise address and contact details are stored only for the owner; public job actions never select them.",
       "operation": "execute",
-      "sql": "INSERT OR IGNORE INTO jobs (id, customer_id, status, title, description, category, location, created_at, updated_at) SELECT :id, :__user_id, 'open', :title, :description, :category, :location, :__now, :__now WHERE EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'customer')",
+      "sql": "INSERT OR IGNORE INTO jobs (id, customer_id, status, title, description, category, location, private_address, contact_details, lifecycle, created_at, updated_at) SELECT :id, :__user_id, CASE WHEN :lifecycle = 'open' THEN 'open' ELSE 'closed' END, :title, :description, :category, :location, :private_address, :contact_details, :lifecycle, :__now, :__now WHERE EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'customer') AND length(trim(:title)) BETWEEN 1 AND 120 AND length(trim(:description)) BETWEEN 1 AND 4000 AND :category IN ('plumber', 'electrician', 'carpenter', 'painter', 'landscaper', 'builder', 'cleaner', 'other') AND length(trim(:location)) BETWEEN 1 AND 120 AND length(trim(:private_address)) <= 500 AND length(trim(:contact_details)) <= 500 AND :lifecycle IN ('draft', 'open')",
       "params": {
         "id": {
           "type": "string",
@@ -537,15 +568,46 @@
           "type": "string",
           "description": "Broad service area only",
           "default": ""
+        },
+        "private_address": {
+          "type": "string",
+          "description": "Precise address, visible only to the customer owner and future authorised job participants",
+          "default": ""
+        },
+        "contact_details": {
+          "type": "string",
+          "description": "Private contact preference, never public",
+          "default": ""
+        },
+        "lifecycle": {
+          "type": "string",
+          "description": "draft | open",
+          "default": "draft"
         }
       },
       "requires_auth": true
     },
     {
-      "name": "set_job_status",
-      "description": "Close or re-open one of the caller's own jobs using the status the caller last saw.",
+      "name": "update_job",
+      "description": "Update a customer-owned draft or open job, including owner-private detail. Closed jobs must be re-opened before editing. Ownership, role and validation are enforced in SQL.",
       "operation": "execute",
-      "sql": "UPDATE jobs SET status = :to, updated_at = :__now WHERE id = :id AND customer_id = :__user_id AND status = :from AND ((:from = 'open' AND :to = 'closed') OR (:from = 'closed' AND :to = 'open'))",
+      "sql": "UPDATE jobs SET title = :title, description = :description, category = :category, location = :location, private_address = :private_address, contact_details = :contact_details, updated_at = :__now WHERE id = :id AND customer_id = :__user_id AND lifecycle IN ('draft', 'open') AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'customer') AND length(trim(:title)) BETWEEN 1 AND 120 AND length(trim(:description)) BETWEEN 1 AND 4000 AND :category IN ('plumber', 'electrician', 'carpenter', 'painter', 'landscaper', 'builder', 'cleaner', 'other') AND length(trim(:location)) BETWEEN 1 AND 120 AND length(trim(:private_address)) <= 500 AND length(trim(:contact_details)) <= 500",
+      "params": {
+        "id": { "type": "string", "description": "Job id" },
+        "title": { "type": "string", "description": "Public job title" },
+        "description": { "type": "string", "description": "Public work description" },
+        "category": { "type": "string", "description": "Trade category" },
+        "location": { "type": "string", "description": "Broad service area only" },
+        "private_address": { "type": "string", "description": "Owner-private precise address", "default": "" },
+        "contact_details": { "type": "string", "description": "Owner-private contact preference", "default": "" }
+      },
+      "requires_auth": true
+    },
+    {
+      "name": "set_job_status",
+      "description": "Move a customer-owned job through draft → open → closed, or re-open closed work, using the lifecycle the caller last saw. A stale or unauthorised transition changes nothing.",
+      "operation": "execute",
+      "sql": "UPDATE jobs SET lifecycle = :to, status = CASE WHEN :to = 'open' THEN 'open' ELSE 'closed' END, updated_at = :__now WHERE id = :id AND customer_id = :__user_id AND lifecycle = :from AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'customer') AND ((:from = 'draft' AND :to = 'open') OR (:from = 'open' AND :to = 'closed') OR (:from = 'closed' AND :to = 'open'))",
       "params": {
         "id": {
           "type": "string",
@@ -553,7 +615,7 @@
         },
         "from": {
           "type": "string",
-          "description": "Current status the caller last saw"
+          "description": "Current lifecycle the caller last saw"
         },
         "to": {
           "type": "string",

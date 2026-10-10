@@ -45,7 +45,7 @@ export function Stars({ rating }: { rating: number }) {
 export function Status({ value }: { value: string }) {
   const tone: Record<string, string> = {
     active: 'var(--success)', open: 'var(--success)', accepted: 'var(--success)', completed: 'var(--sky)',
-    pending: 'var(--warning)', paused: 'var(--muted)', closed: 'var(--muted)', declined: 'var(--danger)', cancelled: 'var(--muted)', archived: 'var(--muted)',
+    pending: 'var(--warning)', draft: 'var(--warning)', paused: 'var(--muted)', closed: 'var(--muted)', declined: 'var(--danger)', cancelled: 'var(--muted)', archived: 'var(--muted)',
   }
   return (
     <span className="rounded-full border px-2 py-0.5 text-xs font-semibold" style={{ color: tone[value] ?? 'var(--muted)', borderColor: 'var(--line)' }}>
