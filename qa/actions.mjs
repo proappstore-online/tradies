@@ -170,7 +170,7 @@ ok(call('list_listings', null, { category: 'electrician', location: 'north' }).l
 
 // --- Requests -------------------------------------------------------------------------------
 ok(call('create_request', OWNER, { id: 'r-own', listing_id: L, requester_name: 'Olive' }) === 0, 'tradie cannot enquire on their own service')
-ok(call('send_message', SEEKER, { listing_id: L, recipient_id: OWNER, sender_name: 'Sam', body: 'Hello' }) === 0, 'a customer cannot message before starting a private enquiry')
+ok(call('send_message', SEEKER, { id: 'before-enquiry-message', listing_id: L, recipient_id: OWNER, sender_name: 'Sam', body: 'Hello' }) === 0, 'a customer cannot message before starting a private enquiry')
 const publicJobCountBeforeDirectEnquiry = call('list_jobs', null).length
 ok(call('create_request', SEEKER, { id: 'r-1', listing_id: L, requester_name: 'Sam', note: 'Can you help?' }) === 1, 'customer sends a private enquiry')
 ok(call('list_incoming_requests', OWNER).some((r) => r.id === 'r-1' && r.requester_name === 'Sam'), 'tradie sees the direct enquiry in their private inbox')
@@ -214,12 +214,12 @@ ok(call('create_review', SEEKER, { request_id: 'r-1', author_name: 'Sam', rating
 ok(!('author_id' in (call('list_reviews', null, { listing_id: L })[0] ?? {})), 'public reviews never expose the author id')
 
 // --- Messages and blocks --------------------------------------------------------------------
-ok(call('send_message', SEEKER, { listing_id: L, recipient_id: OWNER, sender_name: 'Sam', body: 'Still free?' }) === 1, 'seeker messages the owner')
-ok(call('send_message', STRANGER, { listing_id: L, recipient_id: SEEKER, sender_name: 'Stan', body: 'Hi' }) === 0, 'a third party cannot message a seeker about a listing they do not own')
-ok(call('send_message', OWNER, { listing_id: L, recipient_id: OWNER, sender_name: 'Olive', body: 'Me' }) === 0, 'messaging yourself is refused')
+ok(call('send_message', SEEKER, { id: 'direct-message-retry', listing_id: L, recipient_id: OWNER, sender_name: 'Sam', body: 'Still free?' }) === 1 && call('send_message', SEEKER, { id: 'direct-message-retry', listing_id: L, recipient_id: OWNER, sender_name: 'Sam', body: 'Still free?' }) === 0 && call('list_messages', SEEKER, { listing_id: L, other_id: OWNER }).filter((message) => message.id === 'direct-message-retry').length === 1, 'direct messages are idempotent by client id for uncertain retry')
+ok(call('send_message', STRANGER, { id: 'stranger-message', listing_id: L, recipient_id: SEEKER, sender_name: 'Stan', body: 'Hi' }) === 0, 'a third party cannot message a seeker about a listing they do not own')
+ok(call('send_message', OWNER, { id: 'self-message', listing_id: L, recipient_id: OWNER, sender_name: 'Olive', body: 'Me' }) === 0, 'messaging yourself is refused')
 ok(call('list_messages', STRANGER, { listing_id: L, other_id: OWNER }).length === 0, 'a stranger reads nothing from the thread')
 ok(call('block_user', SEEKER, { blocked_id: OWNER }) === 1, 'seeker blocks the owner')
-ok(call('send_message', OWNER, { listing_id: L, recipient_id: SEEKER, sender_name: 'Olive', body: 'Hello?' }) === 0 && call('send_work_message', OWNER, { id: 'blocked-work-message', target_type: 'request', target_id: 'r-1', recipient_id: SEEKER, sender_name: 'Olive', body: 'Hello?' }) === 0, 'a blocked owner cannot send listing or selected-work messages')
+ok(call('send_message', OWNER, { id: 'blocked-direct-message', listing_id: L, recipient_id: SEEKER, sender_name: 'Olive', body: 'Hello?' }) === 0 && call('send_work_message', OWNER, { id: 'blocked-work-message', target_type: 'request', target_id: 'r-1', recipient_id: SEEKER, sender_name: 'Olive', body: 'Hello?' }) === 0, 'a blocked owner cannot send listing or selected-work messages')
 ok(call('create_request', SEEKER, { id: 'r-3', listing_id: L, requester_name: 'Sam' }) === 0, 'blocks also close requests')
 ok(call('unblock_user', STRANGER, { blocked_id: OWNER }) === 0, 'only the blocker can unblock')
 ok(call('block_user', SEEKER, { blocked_id: SEEKER }) === 0 && call('report_user', SEEKER, { reported_id: SEEKER, reason: 'spam' }) === 0, 'self-block and self-report are refused')

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Button, Input } from '@proappstore/sdk/ui'
 import { app, pub, q, x, when, type Conversation, type Listing, type Message, type WorkAgreement, type WorkConversation, type WorkMessage } from '../api'
 import { Empty, Section } from '../components'
@@ -96,31 +96,53 @@ export function Thread({ listingId, otherId }: { listingId: string; otherId: str
   const [listing, setListing] = useState<Listing | null>(null)
   const [body, setBody] = useState('')
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
   const end = useRef<HTMLDivElement>(null)
+  const pendingMessage = useRef<{ id: string; body: string } | null>(null)
   const me = app.auth.user
 
-  const load = () => q<Message>('list_messages', { listing_id: listingId, other_id: otherId }).then(setRows)
-  useEffect(() => {
-    load()
-    pub<Listing>('get_listing', { id: listingId }).then(([l]) => setListing(l ?? null))
-    const t = setInterval(load, 15_000)
-    return () => clearInterval(t)
+  const load = useCallback(async ({ reportFailure = false, clearError = false }: { reportFailure?: boolean; clearError?: boolean } = {}) => {
+    try {
+      const [messages, listings] = await Promise.all([
+        q<Message>('list_messages', { listing_id: listingId, other_id: otherId }),
+        pub<Listing>('get_listing', { id: listingId }),
+      ])
+      setRows(messages); setListing(listings[0] ?? null)
+      if (clearError) setError('')
+      return messages
+    } catch (cause) {
+      if (reportFailure) setError(cause instanceof Error ? cause.message : 'Could not load this conversation.')
+      return null
+    }
   }, [listingId, otherId])
+  useEffect(() => {
+    void load({ reportFailure: true, clearError: true })
+    const t = setInterval(() => { void load() }, 15_000)
+    return () => clearInterval(t)
+  }, [load])
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [rows.length])
 
   async function send(e: FormEvent) {
     e.preventDefault()
-    if (!me || !body.trim()) return
-    const changes = await x('send_message', { listing_id: listingId, recipient_id: otherId, sender_name: me.name, body: body.trim() })
-    if (!changes) { setError('Message not delivered: this thread is closed (blocked, or not your listing).'); return }
-    setError('')
-    setBody('')
-    await load()
+    if (saving || !me || !body.trim()) return
+    const draft = body.trim()
+    const id = pendingMessage.current?.body === draft ? pendingMessage.current.id : crypto.randomUUID()
+    pendingMessage.current = { id, body: draft }
+    setSaving(true); setError('')
+    try {
+      const changes = await x('send_message', { id, listing_id: listingId, recipient_id: otherId, sender_name: me.name, body: draft })
+      const messages = await load()
+      if (!changes && !messages?.some((message) => message.id === id)) throw new Error('Message not delivered: this thread is closed (blocked, or not your listing).')
+      pendingMessage.current = null
+      setBody('')
+    } catch (cause) {
+      setError(cause instanceof Error ? `${cause.message} Your draft was kept; retrying will use the same message id.` : 'Could not send this message. Your draft was kept; retrying is safe.')
+    } finally { setSaving(false) }
   }
 
   const otherName = rows.find((m) => m.sender_id === otherId)?.sender_name ?? (listing?.owner_id === otherId ? listing.owner_name : 'User')
   return (
-    <Section title={otherName || 'Conversation'} action={<a href={`#/l/${listingId}`} className="text-sm text-[var(--accent)] underline-offset-4 hover:underline">{listing?.title ?? 'View listing'}</a>}>
+    <Section title={otherName || 'Conversation'} action={<><a href={`#/l/${listingId}`} className="text-sm text-[var(--accent)] underline-offset-4 hover:underline">{listing?.title ?? 'View listing'}</a><Button variant="ghost" size="sm" onClick={() => { void load({ reportFailure: true, clearError: true }) }}>Retry</Button></>}>
       <div className="max-h-[60dvh] space-y-2 overflow-y-auto rounded-[var(--radius)] border border-[var(--line)] p-3">
         {rows.length === 0 ? <p className="text-sm text-[var(--muted)]">Say hello.</p> : null}
         {rows.map((m) => (
@@ -133,7 +155,7 @@ export function Thread({ listingId, otherId }: { listingId: string; otherId: str
       </div>
       <form onSubmit={send} className="mt-3 flex gap-2">
         <div className="flex-1"><Input aria-label="Message" placeholder="Write a message" maxLength={2000} value={body} onChange={(e) => setBody(e.target.value)} /></div>
-        <Button type="submit">Send</Button>
+        <Button type="submit" loading={saving} disabled={saving}>Send</Button>
       </form>
       {error ? <p role="alert" className="mt-2 text-sm text-[var(--danger)]">{error}</p> : null}
       <p className="mt-3 text-xs text-[var(--muted)]"><a href="#/settings" className="underline-offset-4 hover:underline">Block or report</a> this person from Settings.</p>

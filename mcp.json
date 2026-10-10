@@ -340,10 +340,14 @@
     },
     {
       "name": "send_message",
-      "description": "Send a private message after a direct enquiry. Threads only run between that enquiry's customer and tradie; blocks are enforced here as well as on enquiries.",
+      "description": "Send a private message after a direct enquiry. The caller supplies an id for safe retry: repeats do not create another message. Threads only run between that enquiry's customer and tradie; blocks are enforced here as well as on enquiries.",
       "operation": "execute",
-      "sql": "INSERT INTO messages (id, listing_id, sender_id, sender_name, recipient_id, body, created_at) SELECT :__uuid, :listing_id, :__user_id, :sender_name, :recipient_id, :body, :__now WHERE :recipient_id != :__user_id AND length(trim(:sender_name)) BETWEEN 1 AND 120 AND length(trim(:body)) BETWEEN 1 AND 2000 AND EXISTS (SELECT 1 FROM requests r JOIN listings l ON l.id = r.listing_id WHERE r.listing_id = :listing_id AND ((r.requester_id = :__user_id AND l.owner_id = :recipient_id) OR (l.owner_id = :__user_id AND r.requester_id = :recipient_id))) AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = :recipient_id) OR (b.blocker_id = :recipient_id AND b.blocked_id = :__user_id))",
+      "sql": "INSERT OR IGNORE INTO messages (id, listing_id, sender_id, sender_name, recipient_id, body, created_at) SELECT :id, :listing_id, :__user_id, :sender_name, :recipient_id, :body, :__now WHERE :recipient_id != :__user_id AND length(trim(:sender_name)) BETWEEN 1 AND 120 AND length(trim(:body)) BETWEEN 1 AND 2000 AND EXISTS (SELECT 1 FROM requests r JOIN listings l ON l.id = r.listing_id WHERE r.listing_id = :listing_id AND ((r.requester_id = :__user_id AND l.owner_id = :recipient_id) OR (l.owner_id = :__user_id AND r.requester_id = :recipient_id))) AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = :recipient_id) OR (b.blocker_id = :recipient_id AND b.blocked_id = :__user_id))",
       "params": {
+        "id": {
+          "type": "string",
+          "description": "Client-generated message id; retry with the same id"
+        },
         "listing_id": {
           "type": "string",
           "description": "Listing id"

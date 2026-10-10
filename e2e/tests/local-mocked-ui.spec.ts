@@ -12,6 +12,7 @@ type Job = { id: string; lifecycle: 'draft' | 'open' | 'closed'; title: string; 
 type Quote = { id: string; target_type: 'job' | 'request'; target_id: string; status: 'submitted' | 'accepted' | 'declined'; scope: string; amount: number; currency: string; timing: string; valid_until: number | null; notes: string; revision: number; created_at: number; updated_at: number; accepted_at: number | null; tradie_id: string }
 type Request = { id: string; listing_id: string; requester_id: string; requester_name: string; status: 'pending' | 'accepted' | 'completed'; note: string; created_at: number; updated_at: number; listing_title: string; owner_id: string; owner_name: string }
 type WorkMessage = { id: string; target_type: 'job' | 'request'; target_id: string; sender_id: string; sender_name: string; recipient_id: string; body: string; created_at: number }
+type DirectMessage = { id: string; listing_id: string; sender_id: string; sender_name: string; recipient_id: string; body: string; created_at: number }
 type Agreement = { target_type: 'job' | 'request'; target_id: string; quote_id: string; status: 'agreed' | 'customer_completed' | 'tradie_completed' | 'completed'; agreed_at: number; updated_at: number; completed_at: number | null }
 
 const users: Record<Role, User> = {
@@ -29,11 +30,17 @@ function seed() {
     quotes: [] as Quote[],
     requests: [] as Request[],
     messages: [] as WorkMessage[],
+    directMessages: [] as DirectMessage[],
     agreements: [] as Agreement[],
     listing: { id: 'listing-1', owner_id: users.tradie.id, owner_name: users.tradie.name, status: 'active', title: 'Taylor Plumbing', description: 'Licensed plumbing repairs and installations.', category: 'plumber', location: 'Melbourne', lat: null, lng: null, images: '[]', created_at: now, updated_at: now } as PublicListing,
     providerListings: [] as PublicListing[],
     delayDirectory: false,
     failJobs: false,
+    failQuoteLoads: 0,
+    failMessageLoads: 0,
+    failMessageSendAfterPersist: 0,
+    delayMessageSendMs: 0,
+    directSendIds: [] as string[],
   }
 }
 
@@ -117,7 +124,9 @@ async function mockedContext(browser: Browser, role: Role, store: Store): Promis
         store.quotes.push({ id: String(params.id), target_type: 'job', target_id: job.id, status: 'submitted', scope: String(params.scope), amount: Number(params.amount), currency: String(params.currency), timing: String(params.timing), valid_until: params.valid_until ? Number(params.valid_until) : null, notes: String(params.notes ?? ''), revision: 1, created_at: now, updated_at: now, accepted_at: null, tradie_id: currentUser.id })
         return json(changes())
       }
-      case 'list_my_quotes': return json(rows(store.quotes.filter((quote) => quote.tradie_id === currentUser.id)))
+      case 'list_my_quotes':
+        if (store.failQuoteLoads > 0) { store.failQuoteLoads--; return json({ error: 'mock quote service unavailable' }, 500) }
+        return json(rows(store.quotes.filter((quote) => quote.tradie_id === currentUser.id)))
       case 'list_job_quotes': return json(rows(isOwner('job', String(params.job_id)) ? store.quotes.filter((quote) => quote.target_type === 'job' && quote.target_id === params.job_id).map(quoteForCustomer) : []))
       case 'revise_quote': {
         const quote = store.quotes.find((item) => item.id === params.id)
@@ -145,6 +154,21 @@ async function mockedContext(browser: Browser, role: Role, store: Store): Promis
         return json(changes())
       }
       case 'list_request_quotes': return json(rows(isOwner('request', String(params.request_id)) ? store.quotes.filter((quote) => quote.target_type === 'request' && quote.target_id === params.request_id).map(quoteForCustomer) : []))
+      case 'list_messages': {
+        if (store.failMessageLoads > 0) { store.failMessageLoads--; return json({ error: 'mock message service unavailable' }, 500) }
+        return json(rows(store.directMessages.filter((message) => message.listing_id === params.listing_id && ((message.sender_id === currentUser.id && message.recipient_id === params.other_id) || (message.sender_id === params.other_id && message.recipient_id === currentUser.id)))))
+      }
+      case 'send_message': {
+        const allowed = store.requests.some((requestRow) => requestRow.listing_id === params.listing_id && ((requestRow.requester_id === currentUser.id && requestRow.owner_id === params.recipient_id) || (requestRow.owner_id === currentUser.id && requestRow.requester_id === params.recipient_id)))
+        if (!allowed || params.recipient_id === currentUser.id) return json(changes(0))
+        const id = String(params.id)
+        store.directSendIds.push(id)
+        const exists = store.directMessages.some((message) => message.id === id)
+        if (!exists) store.directMessages.push({ id, listing_id: String(params.listing_id), sender_id: currentUser.id, sender_name: currentUser.name, recipient_id: String(params.recipient_id), body: String(params.body), created_at: now })
+        if (store.delayMessageSendMs) await new Promise((resolve) => setTimeout(resolve, store.delayMessageSendMs))
+        if (store.failMessageSendAfterPersist > 0) { store.failMessageSendAfterPersist--; return json({ error: 'mock connection dropped after persistence' }, 500) }
+        return json(changes(exists ? 0 : 1))
+      }
       case 'list_work_conversations': {
         const result = store.quotes.filter((quote) => quote.status === 'accepted' && (quote.tradie_id === currentUser.id || isOwner(quote.target_type, quote.target_id))).map((quote) => ({ target_type: quote.target_type, target_id: quote.target_id, quote_id: quote.id, title: quote.target_type === 'job' ? store.jobs.find((job) => job.id === quote.target_id)?.title : store.requests.find((item) => item.id === quote.target_id)?.listing_title, other_id: quote.tradie_id === currentUser.id ? targetOwner(store, quote.target_type, quote.target_id) : quote.tradie_id, other_name: quote.tradie_id === currentUser.id ? users.customer.name : users.tradie.name, last_at: now }))
         return json(rows(result))
@@ -256,6 +280,51 @@ test('customer sees distinct published provider labels and profile links before 
   await expect(customer.page.getByRole('link', { name: 'Taylor Plumbing' })).toHaveAttribute('href', '#/l/listing-1')
   await expect(customer.page.getByRole('link', { name: 'Riley Plumbing' })).toHaveAttribute('href', '#/l/rival-listing')
   await expect(customer.page.getByRole('button', { name: 'Accept quote' })).toHaveCount(2)
+  await customer.context.close()
+})
+
+test('quotes initial load failure presents Retry and recovers', async ({ browser }) => {
+  const store = seed()
+  // React StrictMode invokes the initial effect twice in this local dev build.
+  store.failQuoteLoads = 2
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/quotes')
+  await expect(customer.page.getByRole('alert')).toContainText('mock quote service unavailable')
+  await expect(customer.page.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await customer.page.getByRole('button', { name: 'Retry' }).click()
+  await expect(customer.page.getByText('No quotes yet')).toBeVisible()
+  await expect(customer.page.getByRole('alert')).toHaveCount(0)
+  await customer.context.close()
+})
+
+test('direct enquiry thread retries failed loads and uncertain sends without duplicate messages', async ({ browser }) => {
+  const store = seed()
+  store.requests.push({ id: 'message-request', listing_id: store.listing.id, requester_id: users.customer.id, requester_name: users.customer.name, status: 'pending', note: 'Please message me privately.', created_at: now, updated_at: now, listing_title: store.listing.title, owner_id: users.tradie.id, owner_name: users.tradie.name })
+  // Keep both StrictMode initial loads failing so the rendered recovery state is stable.
+  store.failMessageLoads = 2
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto(`/#/messages/${store.listing.id}/${users.tradie.id}`)
+  await expect(customer.page.getByRole('alert')).toContainText('mock message service unavailable')
+  await customer.page.getByRole('button', { name: 'Retry' }).click()
+  await expect(customer.page.getByText('Say hello.')).toBeVisible()
+
+  store.delayMessageSendMs = 200
+  await customer.page.getByLabel('Message').fill('Please confirm the booking time.')
+  await customer.page.getByRole('button', { name: 'Send' }).click()
+  await expect(customer.page.getByRole('button', { name: 'Send' })).toBeDisabled()
+  await expect(customer.page.getByText('Please confirm the booking time.')).toBeVisible()
+
+  store.delayMessageSendMs = 0
+  store.failMessageSendAfterPersist = 1
+  await customer.page.getByLabel('Message').fill('This is safe to retry.')
+  await customer.page.getByRole('button', { name: 'Send' }).click()
+  await expect(customer.page.getByRole('alert')).toContainText('Your draft was kept; retrying will use the same message id.')
+  await expect(customer.page.getByLabel('Message')).toHaveValue('This is safe to retry.')
+  await customer.page.getByRole('button', { name: 'Send' }).click()
+  await expect(customer.page.getByText('This is safe to retry.')).toBeVisible()
+  await expect(customer.page.getByLabel('Message')).toHaveValue('')
+  expect(store.directMessages.filter((message) => message.body === 'This is safe to retry.')).toHaveLength(1)
+  expect(store.directSendIds.slice(-2)[0]).toBe(store.directSendIds.slice(-1)[0])
   await customer.context.close()
 })
 
