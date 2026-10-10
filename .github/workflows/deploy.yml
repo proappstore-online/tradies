@@ -192,7 +192,7 @@ jobs:
         env:
           E2E_BASE_URL: https://${{ github.event.repository.name }}.proappstore.online
           E2E_SESSION_TOKEN: ${{ secrets.PAS_E2E_SESSION_TOKEN }}
-        run: npx playwright test
+        run: npx playwright test --project=live-signed-out-smoke
       - name: Publish test results (kb.proappstore.online/<app>/.e2e/summary.json)
         if: always()
         working-directory: e2e
