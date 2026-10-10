@@ -1,62 +1,93 @@
-# template-marketplace
+# Tradies
 
-Two-sided listings marketplace template for [ProAppStore](https://proappstore.online):
-owners publish listings, seekers browse a public catalogue, save favourites, send a
-request (booking / application / enquiry — you pick the noun), message the owner and
-review after a completed request. Blocks and reports are built in.
+Tradies connects customers with local tradespeople on
+[ProAppStore](https://proappstore.online). Customers can publish a job and
+compare private quotes, or browse the directory and send a private enquiry to a
+selected tradie without first creating a public job. Tradies and customers can
+then agree work and use a private conversation. Payment is arranged externally:
+Tradies has no checkout, payment processing, escrow, billing or pricing claims.
 
-Scaffold with the CLI once the template is in the catalogue:
+## Foundation and reuse
+
+Tradies is an adaptation of the approved `template-marketplace` baseline, not a
+from-scratch marketplace rewrite. It retains the platform-cookie authentication
+flow, ProShell, registered data actions, additive D1/SQLite migrations, SQL
+ownership and block guards, storage uploads and keyless deployment. The generic
+listing becomes a public tradie service profile, while the baseline request
+becomes a participant-scoped direct enquiry.
+
+See [REQUIREMENTS.md](REQUIREMENTS.md) for the issue #2 requirements matrix and
+[ARCHITECTURE.md](ARCHITECTURE.md) for the data/privacy design.
+
+## Product boundaries
+
+- A signed-in person chooses one immutable app role: `customer` or `tradie`.
+- Customers own their jobs and can send direct enquiries; tradies own public
+  service profiles and receive enquiries.
+- Directory profiles and open job leads expose a display name (for a tradie),
+  trade, description and broad service area only.
+- Customer identity, precise address, contact preferences, enquiries, quotes,
+  messages and agreements are private to their authorised participants.
+- There are no fabricated licences, verification badges, reviews or business
+  policies. Reviews only arise from completed participant enquiries.
+
+## Repository layout
+
+- `migrations.json` — additive listings, profiles, jobs, quotes, work
+  conversations, safety and review schema. Migrations run before actions
+  register on deployment.
+- `mcp.json` — public and authenticated registered actions. Public queries use
+  explicit privacy-safe columns and literal limits; private actions use
+  `:__user_id` and SQL participant/ownership guards.
+- `web/src/api.ts` — `initPro` configured for `platform-cookie` auth, typed
+  action helpers and API data types.
+- `web/src/App.tsx` — hash routing, signed-out public discovery, role-aware
+  ProShell navigation, and customer/tradie role setup.
+- `web/src/pages/` — directory, tradie services, customer jobs, quotes,
+  private enquiries/messages/work conversations, reviews and safety settings.
+- `qa/actions.mjs` — SQLite behavioural tests for roles, ownership, privacy,
+  lifecycle transitions and blocks.
+- `qa/foundation-contract.mjs` — structural guard for the issue #2 baseline,
+  auth, role and public/private data decisions.
+- `qa/release-contract.mjs` — public shell, accessibility and marketplace
+  boundary checks.
+- `e2e/` — local mocked user-journey tests and live signed-out smoke tests.
+
+## Development
+
+Requires Node 22+ and pnpm 10.
 
 ```bash
-npm i -g @proappstore/cli
-pas create my-market --template template-marketplace
+pnpm install
+pnpm dev
 ```
 
-## What's in here
+Run the complete local quality gate:
 
-- `migrations.json` — `listings`, `favorites`, `requests`, `messages`, `reviews`, `blocks`, `reports`. Additive-only; applied on every deploy before actions register.
-- `mcp.json` — 28 registered actions. Five are **public** catalogue reads (`list_listings`, `search_listings`, `get_listing`, `list_reviews`, `listing_stats`: named columns, literal `LIMIT`, called with `callPublic`); every other statement is scoped to the owner, the requester or the message pair with `:__user_id`, and every state transition is guarded in SQL (`AND status = :from`).
-- `web/src/api.ts` — `initPro` on platform-cookie auth, typed action helpers, and the **extension points**: `REQUEST` (the noun), `CATEGORIES`, `MAPS_ENABLED`.
-- `web/src/App.tsx` — hash router; browse and listing detail render without a session, everything else inside `ProShell`.
-- `web/src/pages/` — Browse + Saved, Listing (request, review, message), Requests (mine) + Inbox (owner transitions), Owner dashboard + listing form (photos via `app.storage.uploadUserPublic`, optional geocode), Messages, Settings (block / report).
-- `qa/actions.mjs` — negative tests per scoped action against a real SQLite built from `migrations.json` (`pnpm test`).
-- `.github/workflows/` — keyless deploy (migrations → actions → R2), compliance, CI typecheck.
+```bash
+pnpm test
+pnpm build
+```
 
-## Extending
+`pnpm test` typechecks the web app and runs the foundation, action/privacy and
+release-contract suites against the declared migrations and action manifest.
 
-| You want | Change |
-|---|---|
-| A different request noun (booking, application, match) | `REQUEST` in `api.ts`; status names in `set_request_status` if the lifecycle differs |
-| Listing attributes (bedrooms, salary, make/model) | add nullable or defaulted columns in a new migration, thread them through `create_listing` / `update_listing` and the public column list, and the form |
-| A map on listings | `MAPS_ENABLED = true` — geocodes the location on save with `app.maps.geocode` and embeds `app.maps.embedUrl` on the detail page |
-| Real-time chat in the thread | add `app.rooms` on top of the polling `Thread`; keep `send_message` as the record |
-| Notifications on request status | `app.notifications` from the Inbox transitions |
+## Security model
 
-## What this template deliberately does not do
+The platform is the identity provider; the app does not create a second password
+or token system. App-local profiles only record a user id, role and (for a
+tradie) primary trade category. SQL guards, rather than UI checks alone, enforce
+role, ownership, blocks, state transitions and participant access. The public
+action surface intentionally never returns customer ids/names, precise addresses,
+contact details, enquiry notes, quote terms or message bodies.
 
-Payments and escrow (the platform subscription is the only billing), real-time dispatch or
-tracking, server-authoritative matching, community groups. No seed tooling ships in the
-manifest; use `pas` or the console to load demo data.
+## Deployment
 
-## Security notes
-
-- Public tools expose the owner's chosen display name and platform user id (needed to message them) and never a reviewer's id.
-- `create_request` and `send_message` refuse blocked pairs in SQL, not in the UI.
-- Reviews attach to a completed request the caller made, once (`UNIQUE(request_id)`).
-- Archiving is the soft delete; history stays consistent.
-
-## Standard audit (1.5)
-
-Static audit at the time of staging: `pas check` passes all 20 checks with no warnings;
-the manifest registers through the platform's own validation (manifest rules, PAS-DATA-011
-public-tool rules, `:__user_id` scoping, schema coherence) and the migrations pass the
-additive-only lint — see `test/template-marketplace.test.ts` in the platform repository.
-The three deviations the base template carries are fixed here: `initPro` sets
-`authMode: 'platform-cookie'` (PAS-AUTH-001), the theme boot script reads `stores-theme`
-(PAS-UI-002), and the viewport allows zoom (PAS-UI-007). Known deviations: none. The
-live checks (reachability, served manifest, fonts, tracking) run once an app built from
-this template is deployed.
+GitHub Actions validates the project and deploys keylessly. The deployment
+workflow applies migrations, registers actions and publishes the web build; its
+E2E job runs the signed-out live smoke suite independently from local mocked
+journey coverage.
 
 ## License
 
-MIT.
+MIT
