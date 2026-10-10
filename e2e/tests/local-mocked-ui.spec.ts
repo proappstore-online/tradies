@@ -5,7 +5,7 @@ import { expect, test, type Browser, type BrowserContext, type Page, type Reques
  * API is used here: a harmless e2e_session cookie selects one of these mock
  * identities and page.route() implements the platform-cookie endpoints.
  */
-type Role = 'customer' | 'tradie' | 'outsider'
+type Role = 'customer' | 'tradie' | 'rivalTradie' | 'outsider'
 type User = { id: string; login: string; name: string }
 type Job = { id: string; lifecycle: 'draft' | 'open' | 'closed'; title: string; description: string; category: string; location: string; private_address?: string; contact_details?: string; created_at: number; updated_at: number; owner_id: string }
 type Quote = { id: string; target_type: 'job' | 'request'; target_id: string; status: 'submitted' | 'accepted' | 'declined'; scope: string; amount: number; currency: string; timing: string; valid_until: number | null; notes: string; revision: number; created_at: number; updated_at: number; accepted_at: number | null; tradie_id: string }
@@ -16,6 +16,7 @@ type Agreement = { target_type: 'job' | 'request'; target_id: string; quote_id: 
 const users: Record<Role, User> = {
   customer: { id: 'customer-1', login: 'casey.customer', name: 'Casey Customer' },
   tradie: { id: 'tradie-1', login: 'taylor.tradie', name: 'Taylor Tradie' },
+  rivalTradie: { id: 'rival-tradie-1', login: 'riley.tradie', name: 'Riley Tradie' },
   outsider: { id: 'outsider-1', login: 'olivia.outsider', name: 'Olivia Outsider' },
 }
 
@@ -38,7 +39,7 @@ type Store = ReturnType<typeof seed>
 
 function roleFor(request: PlaywrightRequest): Role | null {
   const session = request.headers().cookie?.match(/(?:^|;\s*)e2e_session=([^;]+)/)?.[1]
-  return session === 'customer' || session === 'tradie' || session === 'outsider' ? session : null
+  return session === 'customer' || session === 'tradie' || session === 'rivalTradie' || session === 'outsider' ? session : null
 }
 
 function rows(rows: unknown[]) { return { rows } }
@@ -89,7 +90,7 @@ async function mockedContext(browser: Browser, role: Role, store: Store): Promis
       case 'list_reviews': return json(rows([]))
       case 'listing_stats': return json(rows([{ review_count: 0, avg_rating: null }]))
       case 'list_my_favorite_ids': case 'list_my_favorites': return json(rows([]))
-      case 'get_my_profile': return json(rows([{ user_id: currentUser.id, role: currentRole === 'tradie' ? 'tradie' : 'customer', trade_category: currentRole === 'tradie' ? 'plumber' : '' }]))
+      case 'get_my_profile': return json(rows([{ user_id: currentUser.id, role: currentRole === 'tradie' || currentRole === 'rivalTradie' ? 'tradie' : 'customer', trade_category: currentRole === 'tradie' || currentRole === 'rivalTradie' ? 'plumber' : '' }]))
       case 'list_jobs':
         if (store.failJobs) return json({ error: 'mock job service unavailable' }, 500)
         return json(rows(store.jobs.filter((job) => job.lifecycle === 'open').map(({ owner_id, private_address, contact_details, ...job }) => job)))
@@ -226,6 +227,37 @@ test('directory direct enquiry reaches tradie quote and agreement flow without a
   await customer.page.getByRole('button', { name: 'Agree to work' }).click()
   await expect(customer.page.getByText('Work status: agreed')).toBeVisible()
   await customer.context.close(); await tradie.context.close()
+})
+
+test('direct enquiry controls are role-gated and private to its participants', async ({ browser }) => {
+  const store = seed()
+  const note = 'Please keep this bathroom-sink enquiry private.'
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/l/listing-1')
+  await customer.page.getByRole('button', { name: 'Send enquiry' }).click()
+  await customer.page.getByLabel('Note to the tradie').fill(note)
+  await customer.page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(customer.page.getByText('Send enquiry sent privately.')).toBeVisible()
+  expect(store.jobs).toHaveLength(0)
+
+  const owner = await mockedContext(browser, 'tradie', store)
+  await owner.page.goto('/#/inbox')
+  await expect(owner.page.getByText(note)).toBeVisible()
+
+  const rivalTradie = await mockedContext(browser, 'rivalTradie', store)
+  await rivalTradie.page.goto('/#/l/listing-1')
+  await expect(rivalTradie.page.getByRole('button', { name: 'Send enquiry' })).toHaveCount(0)
+  await expect(rivalTradie.page.getByText('Only customers can send direct enquiries.')).toBeVisible()
+  await rivalTradie.page.goto('/#/inbox')
+  await expect(rivalTradie.page.getByText('No incoming enquiries')).toBeVisible()
+  await expect(rivalTradie.page.getByText(note)).toHaveCount(0)
+
+  const outsider = await mockedContext(browser, 'outsider', store)
+  await outsider.page.goto('/#/inbox')
+  await expect(outsider.page.getByText('No incoming enquiries')).toBeVisible()
+  await expect(outsider.page.getByText(note)).toHaveCount(0)
+  await expect(outsider.page.getByText('Casey Customer')).toHaveCount(0)
+  await customer.context.close(); await owner.context.close(); await rivalTradie.context.close(); await outsider.context.close()
 })
 
 test('unrelated user cannot read selected-work quotes or private messages', async ({ browser }) => {
