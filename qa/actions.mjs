@@ -218,6 +218,33 @@ ok(call('send_message', SEEKER, { id: 'direct-message-retry', listing_id: L, rec
 ok(call('send_message', STRANGER, { id: 'stranger-message', listing_id: L, recipient_id: SEEKER, sender_name: 'Stan', body: 'Hi' }) === 0, 'a third party cannot message a seeker about a listing they do not own')
 ok(call('send_message', OWNER, { id: 'self-message', listing_id: L, recipient_id: OWNER, sender_name: 'Olive', body: 'Me' }) === 0, 'messaging yourself is refused')
 ok(call('list_messages', STRANGER, { listing_id: L, other_id: OWNER }).length === 0, 'a stranger reads nothing from the thread')
+const PAGED_LISTING = 'paging-listing'
+ok(call('create_listing', OWNER, { id: PAGED_LISTING, owner_name: 'Olive', title: 'Olive Paging Plumbing', description: 'A fixture used only to verify private thread paging.', category: 'plumber', location: 'Northside' }) === 1 && call('create_request', SEEKER, { id: 'paging-request', listing_id: PAGED_LISTING, requester_name: 'Sam', note: 'Please keep this thread private.' }) === 1, 'pagination fixture has a private direct enquiry')
+const TIED_TIME = 1_700_000_000_000
+const insertDirectPage = db.prepare('INSERT INTO messages (id, listing_id, sender_id, sender_name, recipient_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+for (let index = 0; index < 505; index++) insertDirectPage.run(`page-direct-${String(index).padStart(3, '0')}`, PAGED_LISTING, SEEKER, 'Sam', OWNER, `Direct page ${index}`, TIED_TIME)
+const newestDirectPage = call('list_messages', SEEKER, { listing_id: PAGED_LISTING, other_id: OWNER })
+let directHistory = [...newestDirectPage]
+let directCursor = newestDirectPage[0]
+while (directCursor) {
+  const page = call('list_messages', SEEKER, { listing_id: PAGED_LISTING, other_id: OWNER, before_created_at: directCursor.created_at, before_id: directCursor.id })
+  directHistory.push(...page)
+  directCursor = page[0]
+}
+const chronologicalDirectHistory = [...directHistory].sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id))
+ok(newestDirectPage.length === 100 && newestDirectPage[0]?.id === 'page-direct-405' && newestDirectPage.at(-1)?.id === 'page-direct-504' && directHistory.length === 505 && new Set(directHistory.map((message) => message.id)).size === 505 && chronologicalDirectHistory.every((message, index, all) => index === 0 || message.created_at > all[index - 1].created_at || (message.created_at === all[index - 1].created_at && message.id > all[index - 1].id)), 'direct history returns the latest tied-timestamp page first and every older page exactly once in chronological id order')
+db.prepare("INSERT INTO quotes (id, target_type, target_id, customer_id, tradie_id, status, scope, amount, currency, timing, valid_until, notes, revision, created_at, updated_at, accepted_at) VALUES ('paging-work-quote', 'job', 'paging-work-target', ?, ?, 'accepted', 'Paged work scope', 1, 'AUD', 'Now', NULL, '', 1, ?, ?, ?)").run(SEEKER, OWNER, TIED_TIME, TIED_TIME, TIED_TIME)
+const insertWorkPage = db.prepare('INSERT INTO work_messages (id, target_type, target_id, sender_id, sender_name, recipient_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+for (let index = 0; index < 505; index++) insertWorkPage.run(`page-work-${String(index).padStart(3, '0')}`, 'job', 'paging-work-target', SEEKER, 'Sam', OWNER, `Work page ${index}`, TIED_TIME)
+const newestWorkPage = call('list_work_messages', SEEKER, { target_type: 'job', target_id: 'paging-work-target', other_id: OWNER })
+let workHistory = [...newestWorkPage]
+let workCursor = newestWorkPage[0]
+while (workCursor) {
+  const page = call('list_work_messages', SEEKER, { target_type: 'job', target_id: 'paging-work-target', other_id: OWNER, before_created_at: workCursor.created_at, before_id: workCursor.id })
+  workHistory.push(...page)
+  workCursor = page[0]
+}
+ok(newestWorkPage.length === 100 && newestWorkPage[0]?.id === 'page-work-405' && newestWorkPage.at(-1)?.id === 'page-work-504' && workHistory.length === 505 && new Set(workHistory.map((message) => message.id)).size === 505 && call('list_work_messages', STRANGER, { target_type: 'job', target_id: 'paging-work-target', other_id: OWNER }).length === 0, 'selected-work history has deterministic tied-timestamp pages without duplicates and remains participant-only')
 ok(call('block_user', SEEKER, { blocked_id: OWNER }) === 1, 'seeker blocks the owner')
 ok(call('send_message', OWNER, { id: 'blocked-direct-message', listing_id: L, recipient_id: SEEKER, sender_name: 'Olive', body: 'Hello?' }) === 0 && call('send_work_message', OWNER, { id: 'blocked-work-message', target_type: 'request', target_id: 'r-1', recipient_id: SEEKER, sender_name: 'Olive', body: 'Hello?' }) === 0, 'a blocked owner cannot send listing or selected-work messages')
 ok(call('create_request', SEEKER, { id: 'r-3', listing_id: L, requester_name: 'Sam' }) === 0, 'blocks also close requests')

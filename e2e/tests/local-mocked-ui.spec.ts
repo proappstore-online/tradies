@@ -53,6 +53,13 @@ function roleFor(request: PlaywrightRequest): Role | null {
 
 function rows(rows: unknown[]) { return { rows } }
 function changes(n = 1) { return { meta: { changes: n } } }
+function messagePage<T extends { id: string; created_at: number }>(items: T[], params: Record<string, unknown>) {
+  const beforeCreatedAt = params.before_created_at === undefined ? null : Number(params.before_created_at)
+  const beforeId = params.before_id === undefined ? null : String(params.before_id)
+  return items.filter((item) => beforeCreatedAt === null || item.created_at < beforeCreatedAt || (item.created_at === beforeCreatedAt && beforeId !== null && item.id < beforeId))
+    .sort((a, b) => b.created_at - a.created_at || b.id.localeCompare(a.id)).slice(0, 100)
+    .sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id))
+}
 
 function targetOwner(store: Store, type: 'job' | 'request', id: string) {
   if (type === 'job') return store.jobs.find((job) => job.id === id)?.owner_id
@@ -156,7 +163,7 @@ async function mockedContext(browser: Browser, role: Role, store: Store): Promis
       case 'list_request_quotes': return json(rows(isOwner('request', String(params.request_id)) ? store.quotes.filter((quote) => quote.target_type === 'request' && quote.target_id === params.request_id).map(quoteForCustomer) : []))
       case 'list_messages': {
         if (store.failMessageLoads > 0) { store.failMessageLoads--; return json({ error: 'mock message service unavailable' }, 500) }
-        return json(rows(store.directMessages.filter((message) => message.listing_id === params.listing_id && ((message.sender_id === currentUser.id && message.recipient_id === params.other_id) || (message.sender_id === params.other_id && message.recipient_id === currentUser.id)))))
+        return json(rows(messagePage(store.directMessages.filter((message) => message.listing_id === params.listing_id && ((message.sender_id === currentUser.id && message.recipient_id === params.other_id) || (message.sender_id === params.other_id && message.recipient_id === currentUser.id))), params)))
       }
       case 'send_message': {
         const allowed = store.requests.some((requestRow) => requestRow.listing_id === params.listing_id && ((requestRow.requester_id === currentUser.id && requestRow.owner_id === params.recipient_id) || (requestRow.owner_id === currentUser.id && requestRow.requester_id === params.recipient_id)))
@@ -173,7 +180,7 @@ async function mockedContext(browser: Browser, role: Role, store: Store): Promis
         const result = store.quotes.filter((quote) => quote.status === 'accepted' && (quote.tradie_id === currentUser.id || isOwner(quote.target_type, quote.target_id))).map((quote) => ({ target_type: quote.target_type, target_id: quote.target_id, quote_id: quote.id, title: quote.target_type === 'job' ? store.jobs.find((job) => job.id === quote.target_id)?.title : store.requests.find((item) => item.id === quote.target_id)?.listing_title, other_id: quote.tradie_id === currentUser.id ? targetOwner(store, quote.target_type, quote.target_id) : quote.tradie_id, other_name: quote.tradie_id === currentUser.id ? users.customer.name : users.tradie.name, last_at: now }))
         return json(rows(result))
       }
-      case 'list_work_messages': return json(rows(workAllowed(type, targetId) ? store.messages.filter((item) => item.target_type === type && item.target_id === targetId) : []))
+      case 'list_work_messages': return json(rows(workAllowed(type, targetId) ? messagePage(store.messages.filter((item) => item.target_type === type && item.target_id === targetId), params) : []))
       case 'get_work_agreement': return json(rows(workAllowed(type, targetId) ? store.agreements.filter((item) => item.target_type === type && item.target_id === targetId) : []))
       case 'send_work_message': {
         if (!workAllowed(type, targetId) || params.recipient_id === currentUser.id) return json(changes(0))
@@ -325,6 +332,44 @@ test('direct enquiry thread retries failed loads and uncertain sends without dup
   await expect(customer.page.getByLabel('Message')).toHaveValue('')
   expect(store.directMessages.filter((message) => message.body === 'This is safe to retry.')).toHaveLength(1)
   expect(store.directSendIds.slice(-2)[0]).toBe(store.directSendIds.slice(-1)[0])
+  await customer.context.close()
+})
+
+test('direct and selected-work threads page tied timestamps without losing history or scroll position', async ({ browser }) => {
+  const store = seed()
+  store.requests.push({ id: 'paged-enquiry', listing_id: store.listing.id, requester_id: users.customer.id, requester_name: users.customer.name, status: 'pending', note: 'Paged private enquiry.', created_at: now, updated_at: now, listing_title: store.listing.title, owner_id: users.tradie.id, owner_name: users.tradie.name })
+  for (let index = 0; index < 505; index++) store.directMessages.push({ id: `direct-${String(index).padStart(3, '0')}`, listing_id: store.listing.id, sender_id: users.customer.id, sender_name: users.customer.name, recipient_id: users.tradie.id, body: `Direct history ${index}`, created_at: now - 1 })
+  store.jobs.push({ id: 'paged-job', lifecycle: 'open', title: 'Paged work history', description: 'Selected work with a long history.', category: 'plumber', location: 'Melbourne', owner_id: users.customer.id, created_at: now, updated_at: now })
+  store.quotes.push({ id: 'paged-quote', target_type: 'job', target_id: 'paged-job', status: 'accepted', scope: 'Paged scope', amount: 100, currency: 'AUD', timing: 'Tomorrow', valid_until: null, notes: '', revision: 1, created_at: now, updated_at: now, accepted_at: now, tradie_id: users.tradie.id })
+  for (let index = 0; index < 505; index++) store.messages.push({ id: `work-${String(index).padStart(3, '0')}`, target_type: 'job', target_id: 'paged-job', sender_id: users.customer.id, sender_name: users.customer.name, recipient_id: users.tradie.id, body: `Work history ${index}`, created_at: now - 1 })
+
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto(`/#/messages/${store.listing.id}/${users.tradie.id}`)
+  await expect(customer.page.getByText('Direct history 405')).toBeVisible()
+  await expect(customer.page.getByText('Direct history 404')).toHaveCount(0)
+  const directBox = customer.page.getByText('Direct history 405').locator('..').locator('..')
+  await directBox.evaluate((node) => { node.scrollTop = 40 })
+  for (let page = 0; page < 5; page++) {
+    const older = customer.page.getByRole('button', { name: 'Load older messages' })
+    await older.focus()
+    await older.press('Enter')
+  }
+  await expect(customer.page.getByText('Direct history 0')).toBeVisible()
+  await expect(customer.page.getByText('Direct history 504')).toBeVisible()
+  expect(await directBox.evaluate((node) => node.scrollTop)).toBeGreaterThan(40)
+  await customer.page.getByLabel('Message').fill('Newest direct message')
+  await customer.page.getByRole('button', { name: 'Send' }).click()
+  await expect(customer.page.getByText('Newest direct message')).toBeVisible()
+
+  await customer.page.goto('/#/work/job/paged-job/tradie-1')
+  await expect(customer.page.getByText('Work history 405')).toBeVisible()
+  await expect(customer.page.getByText('Work history 404')).toHaveCount(0)
+  for (let page = 0; page < 5; page++) await customer.page.getByRole('button', { name: 'Load older messages' }).click()
+  await expect(customer.page.getByText('Work history 0')).toBeVisible()
+  await expect(customer.page.getByText('Work history 504')).toBeVisible()
+  await customer.page.getByLabel('Work message').fill('Newest work message')
+  await customer.page.getByRole('button', { name: 'Send' }).click()
+  await expect(customer.page.getByText('Newest work message')).toBeVisible()
   await customer.context.close()
 })
 
