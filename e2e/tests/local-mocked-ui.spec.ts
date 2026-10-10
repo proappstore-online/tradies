@@ -9,7 +9,7 @@ type Role = 'customer' | 'tradie' | 'rivalTradie' | 'outsider'
 type User = { id: string; login: string; name: string }
 type PublicListing = { id: string; owner_id: string; owner_name: string; status: 'active' | 'paused'; title: string; description: string; category: string; location: string; lat: number | null; lng: number | null; images: string; created_at: number; updated_at: number }
 type Job = { id: string; lifecycle: 'draft' | 'open' | 'closed'; title: string; description: string; category: string; location: string; private_address?: string; contact_details?: string; created_at: number; updated_at: number; owner_id: string }
-type Quote = { id: string; target_type: 'job' | 'request'; target_id: string; status: 'submitted' | 'accepted' | 'declined'; scope: string; amount: number; currency: string; timing: string; valid_until: number | null; notes: string; revision: number; created_at: number; updated_at: number; accepted_at: number | null; tradie_id: string }
+type Quote = { id: string; target_type: 'job' | 'request'; target_id: string; status: 'submitted' | 'withdrawn' | 'accepted' | 'declined'; scope: string; amount: number; currency: string; timing: string; valid_until: number | null; notes: string; revision: number; created_at: number; updated_at: number; accepted_at: number | null; tradie_id: string }
 type Request = { id: string; listing_id: string; requester_id: string; requester_name: string; status: 'pending' | 'accepted' | 'completed'; note: string; created_at: number; updated_at: number; listing_title: string; owner_id: string; owner_name: string }
 type WorkMessage = { id: string; target_type: 'job' | 'request'; target_id: string; sender_id: string; sender_name: string; recipient_id: string; body: string; created_at: number }
 type DirectMessage = { id: string; listing_id: string; sender_id: string; sender_name: string; recipient_id: string; body: string; created_at: number }
@@ -158,6 +158,12 @@ async function mockedContext(browser: Browser, role: Role | null, store: Store):
         quote.scope = String(params.scope); quote.amount = Number(params.amount); quote.currency = String(params.currency); quote.timing = String(params.timing); quote.valid_until = params.valid_until ? Number(params.valid_until) : null; quote.notes = String(params.notes ?? ''); quote.revision += 1; quote.updated_at = now
         return json(changes())
       }
+      case 'withdraw_quote': {
+        const quote = store.quotes.find((item) => item.id === params.id)
+        if (!quote || quote.tradie_id !== currentUser.id || quote.status !== 'submitted' || params.from !== 'submitted') return json(changes(0))
+        quote.status = 'withdrawn'; quote.updated_at = now
+        return json(changes())
+      }
       case 'accept_quote': case 'decline_quote': {
         const quote = store.quotes.find((item) => item.id === params.id)
         if (!quote || !isOwner(quote.target_type, quote.target_id) || quote.status !== params.from || (action === 'accept_quote' && Number(params.expected_revision) !== quote.revision)) return json(changes(0))
@@ -261,6 +267,29 @@ test('customer job post, tradie quote, selected-work discussion, agreement and c
   await expect(customer.page.getByText('Work status: agreed')).toBeVisible()
   await customer.page.getByRole('button', { name: 'Confirm completion' }).click()
   await expect(customer.page.getByText('Work status: completed')).toBeVisible()
+  await customer.context.close(); await tradie.context.close()
+})
+
+test('a tradie can revise then withdraw a submitted quote, and the customer cannot select it', async ({ browser }) => {
+  const store = seed()
+  store.jobs.push({ id: 'quote-lifecycle-job', lifecycle: 'open', title: 'Quote lifecycle repair', description: 'A small repair requiring a private quote.', category: 'plumber', location: 'Melbourne', owner_id: users.customer.id, created_at: now, updated_at: now })
+  const tradie = await mockedContext(browser, 'tradie', store)
+  await tradie.page.goto('/#/jobs/quote-lifecycle-job')
+  await fillQuote(tradie.page, '850')
+  await tradie.page.goto('/#/quotes')
+  await tradie.page.getByRole('button', { name: 'Revise' }).click()
+  await tradie.page.getByLabel('Revised work scope').fill('Replace the leaking kitchen tap, test fittings, and dispose of the old part.')
+  await tradie.page.getByLabel('Revised amount').fill('925')
+  await tradie.page.getByRole('button', { name: 'Save revision' }).click()
+  await expect(tradie.page.getByText('revision 2')).toBeVisible()
+  await tradie.page.getByRole('button', { name: 'Withdraw' }).click()
+  await expect(tradie.page.getByText('withdrawn', { exact: true })).toBeVisible()
+
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/quotes')
+  await expect(customer.page.getByText('Replace the leaking kitchen tap, test fittings, and dispose of the old part.')).toBeVisible()
+  await expect(customer.page.getByText('withdrawn', { exact: true })).toBeVisible()
+  await expect(customer.page.getByRole('button', { name: 'Accept quote' })).toHaveCount(0)
   await customer.context.close(); await tradie.context.close()
 })
 

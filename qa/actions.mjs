@@ -65,7 +65,7 @@ const ok = (pass, what) => {
   if (!pass) failures++
 }
 
-const OWNER = 'gh:owner', SEEKER = 'gh:seeker', STRANGER = 'gh:stranger', RIVAL = 'gh:rival', THIRD = 'gh:third', L = 'listing-1'
+const OWNER = 'gh:owner', SEEKER = 'gh:seeker', STRANGER = 'gh:stranger', RIVAL = 'gh:rival', THIRD = 'gh:third', AFTER_ACCEPT = 'gh:after-accept', L = 'listing-1'
 
 // --- Every public tool prepares without a session and names its columns ---------------------
 for (const t of Object.values(TOOLS).filter((t) => t.requires_auth === false)) {
@@ -123,10 +123,12 @@ ok(call('set_job_status', SEEKER, { id: 'job-1', from: 'closed', to: 'open' }) =
 // --- Quotes: public job route --------------------------------------------------------------
 ok(call('create_profile', RIVAL, { role: 'tradie', trade_category: 'plumber' }) === 1, 'a second tradie chooses a role')
 ok(call('create_profile', THIRD, { role: 'tradie', trade_category: 'plumber' }) === 1, 'a third tradie chooses a role')
+ok(call('create_profile', AFTER_ACCEPT, { role: 'tradie', trade_category: 'plumber' }) === 1, 'a fourth tradie fixture chooses a role')
 ok(call('create_listing', RIVAL, { id: 'rival-profile', owner_name: 'Riley', title: 'Riley Plumbing', description: 'Independent plumbing repairs.', category: 'plumber', location: 'Southside' }) === 1, 'a second provider publishes a distinct active profile')
 ok(call('create_listing', RIVAL, { id: 'rival-profile-alt', owner_name: 'Riley', title: 'Riley Plumbing North', description: 'A second published service profile.', category: 'plumber', location: 'Northside' }) === 1, 'the provider can have a second active profile without duplicating a quote row')
 db.prepare("UPDATE listings SET updated_at = 1700000000000 WHERE id IN ('rival-profile', 'rival-profile-alt')").run()
 const quoteTerms = { scope: 'Replace the leaking mixer and test the new fittings.', amount: 245, currency: 'AUD', timing: 'Next week', notes: 'Parts and labour included.' }
+ok(call('create_job_quote', OWNER, { id: 'quote-job-blank-scope', job_id: 'job-1', ...quoteTerms, scope: ' ' }) === 0 && call('create_job_quote', OWNER, { id: 'quote-job-invalid-currency', job_id: 'job-1', ...quoteTerms, currency: 'AU' }) === 0 && call('create_job_quote', OWNER, { id: 'quote-job-negative-amount', job_id: 'job-1', ...quoteTerms, amount: -1 }) === 0, 'quote submission validates scope, ISO currency and informational amount bounds')
 ok(call('create_job_quote', OWNER, { id: 'quote-job-owner', job_id: 'job-1', ...quoteTerms }) === 1, 'a tradie submits a private quote on an open job')
 ok(call('create_job_quote', OWNER, { id: 'quote-job-owner', job_id: 'job-1', ...quoteTerms }) === 0, 'job quote submission is idempotent by client id')
 ok(call('create_job_quote', RIVAL, { id: 'quote-job-rival', job_id: 'job-1', ...quoteTerms, amount: 210 }) === 1, 'a second tradie may submit a competing private quote')
@@ -145,12 +147,14 @@ ok(call('accept_quote', SEEKER, { id: 'quote-job-owner', from: 'submitted', expe
 ok(call('withdraw_quote', RIVAL, { id: 'quote-job-owner', from: 'submitted' }) === 0, 'a rival cannot withdraw another tradie quote')
 ok(call('withdraw_quote', OWNER, { id: 'quote-job-owner', from: 'submitted' }) === 1, 'a tradie withdraws their own quote')
 ok(call('accept_quote', SEEKER, { id: 'quote-job-owner', from: 'withdrawn', expected_revision: 2 }) === 0, 'a withdrawn quote cannot be newly accepted')
+ok(call('create_job_quote', THIRD, { id: 'quote-job-late', job_id: 'job-1', ...quoteTerms, amount: 190 }) === 1, 'a third tradie can quote before a customer selects')
 ok(call('accept_quote', SEEKER, { id: 'quote-job-rival', from: 'submitted', expected_revision: 1 }) === 1, 'customer accepts one current job quote with its observed revision')
 ok(call('accept_quote', SEEKER, { id: 'quote-job-rival', from: 'submitted', expected_revision: 1 }) === 0, 'a stale double accept changes nothing')
-ok(call('create_job_quote', THIRD, { id: 'quote-job-late', job_id: 'job-1', ...quoteTerms, amount: 190 }) === 1 && call('accept_quote', SEEKER, { id: 'quote-job-late', from: 'submitted', expected_revision: 1 }) === 0, 'atomic selected-quote guard prevents contradictory concurrent selections')
+ok(call('create_job_quote', AFTER_ACCEPT, { id: 'quote-job-after-selection', job_id: 'job-1', ...quoteTerms }) === 0, 'a selected job cannot receive a new contradictory quote')
+ok(call('accept_quote', SEEKER, { id: 'quote-job-late', from: 'submitted', expected_revision: 1 }) === 0, 'atomic selected-quote guard prevents contradictory concurrent selections')
 ok(call('decline_quote', SEEKER, { id: 'quote-job-late', from: 'submitted' }) === 1 && call('decline_quote', SEEKER, { id: 'quote-job-late', from: 'submitted' }) === 0, 'customer can decline one submitted quote and stale retries are safe')
 db.prepare("INSERT INTO quotes (id, target_type, target_id, customer_id, tradie_id, status, scope, amount, currency, timing, valid_until, notes, created_at, updated_at) VALUES ('quote-expired-seeded', 'job', 'job-1', ?, ?, 'submitted', 'Scope', 1, 'AUD', 'Tomorrow', ?, '', ?, ?)").run(SEEKER, 'gh:expired', Date.now() - 1, Date.now(), Date.now())
-ok(call('accept_quote', SEEKER, { id: 'quote-expired-seeded', from: 'submitted', expected_revision: 1 }) === 0, 'an expired quote cannot be newly accepted')
+ok(call('accept_quote', SEEKER, { id: 'quote-expired-seeded', from: 'submitted', expected_revision: 1 }) === 0 && call('revise_quote', 'gh:expired', { id: 'quote-expired-seeded', expected_revision: 1, ...quoteTerms }) === 0 && call('decline_quote', SEEKER, { id: 'quote-expired-seeded', from: 'submitted' }) === 0, 'an expired quote cannot be accepted, revived or transitioned')
 
 // --- Selected public-job work: selected tradie and customer only ----------------------------
 ok(call('list_work_conversations', SEEKER).some((c) => c.target_type === 'job' && c.target_id === 'job-1') && call('list_work_conversations', RIVAL).some((c) => c.target_type === 'job' && c.target_id === 'job-1'), 'selected job quote creates a private work thread for exactly its participants')
