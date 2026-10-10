@@ -625,6 +625,78 @@
       "requires_auth": true
     },
     {
+      "name": "create_job_quote",
+      "description": "Submit one private, informational quote for an open customer job. The quote belongs to its tradie and is visible only to that tradie and the job's customer; it never initiates payment or checkout. A client id makes retries safe.",
+      "operation": "execute",
+      "sql": "INSERT OR IGNORE INTO quotes (id, target_type, target_id, customer_id, tradie_id, status, scope, amount, currency, timing, valid_until, notes, created_at, updated_at) SELECT :id, 'job', j.id, j.customer_id, :__user_id, 'submitted', :scope, :amount, :currency, :timing, :valid_until, :notes, :__now, :__now FROM jobs j WHERE j.id = :job_id AND j.status = 'open' AND j.lifecycle = 'open' AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'tradie') AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = j.customer_id) OR (b.blocker_id = j.customer_id AND b.blocked_id = :__user_id)) AND length(trim(:scope)) BETWEEN 1 AND 4000 AND :amount >= 0 AND :amount <= 100000000 AND :currency GLOB '[A-Z][A-Z][A-Z]' AND length(trim(:timing)) BETWEEN 1 AND 500 AND length(trim(:notes)) <= 2000 AND (:valid_until IS NULL OR :valid_until > :__now)",
+      "params": { "id": { "type": "string", "description": "Client-generated quote id" }, "job_id": { "type": "string", "description": "Open job id" }, "scope": { "type": "string", "description": "Proposed work scope" }, "amount": { "type": "number", "description": "Informational amount only; not a payment instruction" }, "currency": { "type": "string", "description": "Three-letter ISO currency code" }, "timing": { "type": "string", "description": "Indicative timing" }, "valid_until": { "type": "integer", "description": "Optional quote expiry timestamp in milliseconds", "optional": true }, "notes": { "type": "string", "description": "Private notes for the customer", "default": "" } },
+      "requires_auth": true
+    },
+    {
+      "name": "create_request_quote",
+      "description": "Submit one private, informational quote in response to a direct enquiry. Only the enquiry's tradie may create it; only that tradie and customer may read it.",
+      "operation": "execute",
+      "sql": "INSERT OR IGNORE INTO quotes (id, target_type, target_id, customer_id, tradie_id, status, scope, amount, currency, timing, valid_until, notes, created_at, updated_at) SELECT :id, 'request', r.id, r.requester_id, :__user_id, 'submitted', :scope, :amount, :currency, :timing, :valid_until, :notes, :__now, :__now FROM requests r JOIN listings l ON l.id = r.listing_id WHERE r.id = :request_id AND l.owner_id = :__user_id AND r.status IN ('pending', 'accepted') AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'tradie') AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = r.requester_id) OR (b.blocker_id = r.requester_id AND b.blocked_id = :__user_id)) AND length(trim(:scope)) BETWEEN 1 AND 4000 AND :amount >= 0 AND :amount <= 100000000 AND :currency GLOB '[A-Z][A-Z][A-Z]' AND length(trim(:timing)) BETWEEN 1 AND 500 AND length(trim(:notes)) <= 2000 AND (:valid_until IS NULL OR :valid_until > :__now)",
+      "params": { "id": { "type": "string", "description": "Client-generated quote id" }, "request_id": { "type": "string", "description": "Direct enquiry id" }, "scope": { "type": "string", "description": "Proposed work scope" }, "amount": { "type": "number", "description": "Informational amount only; not a payment instruction" }, "currency": { "type": "string", "description": "Three-letter ISO currency code" }, "timing": { "type": "string", "description": "Indicative timing" }, "valid_until": { "type": "integer", "description": "Optional quote expiry timestamp in milliseconds", "optional": true }, "notes": { "type": "string", "description": "Private notes for the customer", "default": "" } },
+      "requires_auth": true
+    },
+    {
+      "name": "list_job_quotes",
+      "description": "Compare private quotes for one of the caller's jobs. A customer never sees another customer's quotes, and tradies cannot use this action to inspect rivals.",
+      "operation": "query",
+      "sql": "SELECT id, target_type, target_id, status, scope, amount, currency, timing, valid_until, notes, revision, created_at, updated_at, accepted_at FROM quotes WHERE target_type = 'job' AND target_id = :job_id AND customer_id = :__user_id AND EXISTS (SELECT 1 FROM jobs j WHERE j.id = :job_id AND j.customer_id = :__user_id) ORDER BY CASE status WHEN 'accepted' THEN 0 WHEN 'submitted' THEN 1 ELSE 2 END, amount ASC, updated_at DESC LIMIT 100",
+      "params": { "job_id": { "type": "string", "description": "Customer-owned job id" } },
+      "requires_auth": true
+    },
+    {
+      "name": "list_request_quotes",
+      "description": "Compare private quotes for one of the caller's direct enquiries. A customer never sees another customer's quotes, and tradies cannot use this action to inspect rivals.",
+      "operation": "query",
+      "sql": "SELECT id, target_type, target_id, status, scope, amount, currency, timing, valid_until, notes, revision, created_at, updated_at, accepted_at FROM quotes WHERE target_type = 'request' AND target_id = :request_id AND customer_id = :__user_id AND EXISTS (SELECT 1 FROM requests r WHERE r.id = :request_id AND r.requester_id = :__user_id) ORDER BY CASE status WHEN 'accepted' THEN 0 WHEN 'submitted' THEN 1 ELSE 2 END, amount ASC, updated_at DESC LIMIT 100",
+      "params": { "request_id": { "type": "string", "description": "Customer-owned direct enquiry id" } },
+      "requires_auth": true
+    },
+    {
+      "name": "list_my_quotes",
+      "description": "A tradie's own private quotes only, newest first. This action does not disclose customer details or competing quotes.",
+      "operation": "query",
+      "sql": "SELECT id, target_type, target_id, status, scope, amount, currency, timing, valid_until, notes, revision, created_at, updated_at, accepted_at FROM quotes WHERE tradie_id = :__user_id AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'tradie') ORDER BY updated_at DESC LIMIT 200",
+      "params": {},
+      "requires_auth": true
+    },
+    {
+      "name": "revise_quote",
+      "description": "Revise the caller's submitted quote. Revision is guarded by the current status and replaces the informational terms atomically; it cannot change the customer, tradie, or target.",
+      "operation": "execute",
+      "sql": "UPDATE quotes SET scope = :scope, amount = :amount, currency = :currency, timing = :timing, valid_until = :valid_until, notes = :notes, revision = revision + 1, updated_at = :__now WHERE id = :id AND tradie_id = :__user_id AND status = 'submitted' AND length(trim(:scope)) BETWEEN 1 AND 4000 AND :amount >= 0 AND :amount <= 100000000 AND :currency GLOB '[A-Z][A-Z][A-Z]' AND length(trim(:timing)) BETWEEN 1 AND 500 AND length(trim(:notes)) <= 2000 AND (:valid_until IS NULL OR :valid_until > :__now)",
+      "params": { "id": { "type": "string", "description": "Quote id" }, "scope": { "type": "string", "description": "Proposed work scope" }, "amount": { "type": "number", "description": "Informational amount only" }, "currency": { "type": "string", "description": "Three-letter ISO currency code" }, "timing": { "type": "string", "description": "Indicative timing" }, "valid_until": { "type": "integer", "description": "Optional quote expiry timestamp in milliseconds", "optional": true }, "notes": { "type": "string", "description": "Private notes", "default": "" } },
+      "requires_auth": true
+    },
+    {
+      "name": "withdraw_quote",
+      "description": "Withdraw the caller's currently submitted quote. Accepted, declined, expired and already-withdrawn quotes cannot be moved by this action.",
+      "operation": "execute",
+      "sql": "UPDATE quotes SET status = 'withdrawn', updated_at = :__now WHERE id = :id AND tradie_id = :__user_id AND status = :from AND :from = 'submitted' AND (valid_until IS NULL OR valid_until > :__now)",
+      "params": { "id": { "type": "string", "description": "Quote id" }, "from": { "type": "string", "description": "Current quote status" } },
+      "requires_auth": true
+    },
+    {
+      "name": "accept_quote",
+      "description": "Customer selects one currently valid submitted quote. The atomic no-accepted-quote guard makes simultaneous or stale selection attempts safe; amounts remain informational and payment is arranged outside Tradies.",
+      "operation": "execute",
+      "sql": "UPDATE quotes SET status = 'accepted', accepted_at = :__now, updated_at = :__now WHERE id = :id AND customer_id = :__user_id AND status = :from AND :from = 'submitted' AND (valid_until IS NULL OR valid_until > :__now) AND ((target_type = 'job' AND EXISTS (SELECT 1 FROM jobs j WHERE j.id = quotes.target_id AND j.customer_id = :__user_id)) OR (target_type = 'request' AND EXISTS (SELECT 1 FROM requests r WHERE r.id = quotes.target_id AND r.requester_id = :__user_id AND r.status IN ('pending', 'accepted')))) AND NOT EXISTS (SELECT 1 FROM quotes selected WHERE selected.target_type = quotes.target_type AND selected.target_id = quotes.target_id AND selected.status = 'accepted')",
+      "params": { "id": { "type": "string", "description": "Quote id" }, "from": { "type": "string", "description": "Current quote status" } },
+      "requires_auth": true
+    },
+    {
+      "name": "decline_quote",
+      "description": "Customer declines one submitted quote on their own job or direct enquiry. A stale, expired, withdrawn, accepted, or unauthorised quote changes nothing.",
+      "operation": "execute",
+      "sql": "UPDATE quotes SET status = 'declined', updated_at = :__now WHERE id = :id AND customer_id = :__user_id AND status = :from AND :from = 'submitted' AND ((target_type = 'job' AND EXISTS (SELECT 1 FROM jobs j WHERE j.id = quotes.target_id AND j.customer_id = :__user_id)) OR (target_type = 'request' AND EXISTS (SELECT 1 FROM requests r WHERE r.id = quotes.target_id AND r.requester_id = :__user_id)))",
+      "params": { "id": { "type": "string", "description": "Quote id" }, "from": { "type": "string", "description": "Current quote status" } },
+      "requires_auth": true
+    },
+    {
       "name": "report_user",
       "description": "Report another user, optionally about a specific listing. Reports are reviewed by the app owner (read with the platform's owner tooling, never exposed in-app).",
       "operation": "execute",

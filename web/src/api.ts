@@ -55,6 +55,24 @@ export interface Job {
   updated_at: number
 }
 
+/** Quote terms are private to the submitting tradie and the customer for that job/enquiry. */
+export interface Quote {
+  id: string
+  target_type: 'job' | 'request'
+  target_id: string
+  status: 'submitted' | 'withdrawn' | 'accepted' | 'declined'
+  scope: string
+  amount: number
+  currency: string
+  timing: string
+  valid_until: number | null
+  notes: string
+  revision: number
+  created_at: number
+  updated_at: number
+  accepted_at: number | null
+}
+
 export interface Request {
   id: string
   listing_id: string

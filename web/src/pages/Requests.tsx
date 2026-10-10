@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@proappstore/sdk/ui'
 import { q, x, when, REQUEST, type Request } from '../api'
 import { Empty, Section, Status } from '../components'
+import { CustomerQuoteComparison, QuoteForm } from './Quotes'
 
 export function MyRequests({ title = 'My enquiries' }: { title?: string }) {
   const [rows, setRows] = useState<Request[] | null>(null)
@@ -33,6 +34,7 @@ export function MyRequests({ title = 'My enquiries' }: { title?: string }) {
               {r.owner_id ? <Button variant="ghost" size="sm" onClick={() => { location.hash = `#/messages/${r.listing_id}/${r.owner_id}` }}>Message</Button> : null}
               {r.status === 'pending' || r.status === 'accepted' ? <Button variant="danger" size="sm" onClick={() => cancel(r)}>Cancel</Button> : null}
             </div>
+            <div className="w-full"><CustomerQuoteComparison targetType="request" targetId={r.id} /></div>
           </li>
         ))}
       </ul>
@@ -73,6 +75,7 @@ export function Inbox() {
               {r.status === 'pending' ? <><Button size="sm" onClick={() => move(r, 'accepted')}>Accept</Button><Button variant="danger" size="sm" onClick={() => move(r, 'declined')}>Decline</Button></> : null}
               {r.status === 'accepted' ? <><Button size="sm" onClick={() => move(r, 'completed')}>Mark completed</Button><Button variant="danger" size="sm" onClick={() => move(r, 'declined')}>Decline</Button></> : null}
             </div>
+            {(r.status === 'pending' || r.status === 'accepted') ? <div className="w-full"><QuoteForm targetType="request" targetId={r.id} onDone={load} /></div> : null}
           </li>
         ))}
       </ul>

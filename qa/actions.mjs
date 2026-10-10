@@ -65,7 +65,7 @@ const ok = (pass, what) => {
   if (!pass) failures++
 }
 
-const OWNER = 'gh:owner', SEEKER = 'gh:seeker', STRANGER = 'gh:stranger', L = 'listing-1'
+const OWNER = 'gh:owner', SEEKER = 'gh:seeker', STRANGER = 'gh:stranger', RIVAL = 'gh:rival', THIRD = 'gh:third', L = 'listing-1'
 
 // --- Every public tool prepares without a session and names its columns ---------------------
 for (const t of Object.values(TOOLS).filter((t) => t.requires_auth === false)) {
@@ -107,6 +107,30 @@ ok(call('set_job_status', SEEKER, { id: 'job-1', from: 'open', to: 'closed' }) =
 ok(call('update_job', SEEKER, { id: 'job-1', title: 'Too late', description: 'No', category: 'plumber', location: 'Northside' }) === 0, 'closed jobs cannot be edited until re-opened')
 ok(call('set_job_status', SEEKER, { id: 'job-1', from: 'closed', to: 'open' }) === 1 && call('get_job', null, { id: 'job-1' }).length === 1, 'owner can re-open a closed job')
 
+// --- Quotes: public job route --------------------------------------------------------------
+ok(call('create_profile', RIVAL, { role: 'tradie', trade_category: 'plumber' }) === 1, 'a second tradie chooses a role')
+ok(call('create_profile', THIRD, { role: 'tradie', trade_category: 'plumber' }) === 1, 'a third tradie chooses a role')
+const quoteTerms = { scope: 'Replace the leaking mixer and test the new fittings.', amount: 245, currency: 'AUD', timing: 'Next week', notes: 'Parts and labour included.' }
+ok(call('create_job_quote', OWNER, { id: 'quote-job-owner', job_id: 'job-1', ...quoteTerms }) === 1, 'a tradie submits a private quote on an open job')
+ok(call('create_job_quote', OWNER, { id: 'quote-job-owner', job_id: 'job-1', ...quoteTerms }) === 0, 'job quote submission is idempotent by client id')
+ok(call('create_job_quote', RIVAL, { id: 'quote-job-rival', job_id: 'job-1', ...quoteTerms, amount: 210 }) === 1, 'a second tradie may submit a competing private quote')
+ok(call('create_job_quote', RIVAL, { id: 'quote-job-expired', job_id: 'job-1', ...quoteTerms, valid_until: Date.now() - 1 }) === 0, 'an already-expired quote cannot be submitted')
+const customerJobQuotes = call('list_job_quotes', SEEKER, { job_id: 'job-1' })
+ok(customerJobQuotes.length === 2 && !('tradie_id' in customerJobQuotes[0]), 'the customer can compare quotes without receiving tradie identity data')
+ok(call('list_job_quotes', STRANGER, { job_id: 'job-1' }).length === 0 && call('list_job_quotes', OWNER, { job_id: 'job-1' }).length === 0, 'other customers and tradies cannot inspect private competing job quotes')
+ok(call('list_my_quotes', OWNER).length === 1 && call('list_my_quotes', RIVAL).length === 1, 'each tradie can inspect only their own quotes')
+ok(call('revise_quote', SEEKER, { id: 'quote-job-owner', ...quoteTerms, amount: 260 }) === 0, 'a customer cannot revise a tradie quote')
+ok(call('revise_quote', OWNER, { id: 'quote-job-owner', ...quoteTerms, amount: 260, timing: 'This Friday' }) === 1, 'a tradie revises their submitted quote')
+ok(call('withdraw_quote', RIVAL, { id: 'quote-job-owner', from: 'submitted' }) === 0, 'a rival cannot withdraw another tradie quote')
+ok(call('withdraw_quote', OWNER, { id: 'quote-job-owner', from: 'submitted' }) === 1, 'a tradie withdraws their own quote')
+ok(call('accept_quote', SEEKER, { id: 'quote-job-owner', from: 'withdrawn' }) === 0, 'a withdrawn quote cannot be newly accepted')
+ok(call('accept_quote', SEEKER, { id: 'quote-job-rival', from: 'submitted' }) === 1, 'customer accepts one current job quote')
+ok(call('accept_quote', SEEKER, { id: 'quote-job-rival', from: 'submitted' }) === 0, 'a stale double accept changes nothing')
+ok(call('create_job_quote', THIRD, { id: 'quote-job-late', job_id: 'job-1', ...quoteTerms, amount: 190 }) === 1 && call('accept_quote', SEEKER, { id: 'quote-job-late', from: 'submitted' }) === 0, 'atomic selected-quote guard prevents contradictory concurrent selections')
+ok(call('decline_quote', SEEKER, { id: 'quote-job-late', from: 'submitted' }) === 1 && call('decline_quote', SEEKER, { id: 'quote-job-late', from: 'submitted' }) === 0, 'customer can decline one submitted quote and stale retries are safe')
+db.prepare("INSERT INTO quotes (id, target_type, target_id, customer_id, tradie_id, status, scope, amount, currency, timing, valid_until, notes, created_at, updated_at) VALUES ('quote-expired-seeded', 'job', 'job-1', ?, ?, 'submitted', 'Scope', 1, 'AUD', 'Tomorrow', ?, '', ?, ?)").run(SEEKER, 'gh:expired', Date.now() - 1, Date.now(), Date.now())
+ok(call('accept_quote', SEEKER, { id: 'quote-expired-seeded', from: 'submitted' }) === 0, 'an expired quote cannot be newly accepted')
+
 // --- Listings -------------------------------------------------------------------------------
 ok(call('create_listing', OWNER, { id: 'invalid-service', owner_name: 'Olive', title: 'Missing details', category: 'plumber' }) === 0, 'a profile needs a trade, service area and description')
 ok(call('create_listing', OWNER, { id: L, owner_name: 'Olive', title: 'Olive Plumbing', description: 'Licensed plumbing repairs and installations.', category: 'plumber', location: 'Northside' }) === 1, 'tradie publishes a validated service profile')
@@ -143,6 +167,13 @@ ok(call('set_request_status', OWNER, { id: 'r-1', from: 'pending', to: 'accepted
 ok(call('set_request_status', OWNER, { id: 'r-1', from: 'pending', to: 'accepted' }) === 0, 'a stale client changes nothing')
 ok(call('cancel_request', STRANGER, { id: 'r-1', from: 'accepted' }) === 0, 'a stranger cannot cancel it')
 ok(call('list_incoming_requests', STRANGER).length === 0 && call('list_my_requests', STRANGER).length === 0, 'another customer sees no private enquiries')
+ok(call('create_request_quote', RIVAL, { id: 'quote-request-rival', request_id: 'r-1', ...quoteTerms }) === 0, 'a non-participant tradie cannot quote on a direct enquiry')
+ok(call('create_request_quote', OWNER, { id: 'quote-request-owner', request_id: 'r-1', ...quoteTerms, amount: 180 }) === 1, 'the enquiry tradie submits a private direct-enquiry quote')
+ok(call('list_request_quotes', SEEKER, { request_id: 'r-1' }).length === 1, 'the requesting customer can compare their direct-enquiry quote')
+ok(call('list_request_quotes', STRANGER, { request_id: 'r-1' }).length === 0 && call('list_request_quotes', OWNER, { request_id: 'r-1' }).length === 0, 'direct-enquiry quotes remain private from strangers and the tradie comparison route')
+ok(call('decline_quote', STRANGER, { id: 'quote-request-owner', from: 'submitted' }) === 0, 'a stranger cannot decline another customer’s quote')
+ok(call('accept_quote', SEEKER, { id: 'quote-request-owner', from: 'submitted' }) === 1, 'customer accepts a direct-enquiry quote')
+ok(call('withdraw_quote', OWNER, { id: 'quote-request-owner', from: 'accepted' }) === 0 && call('revise_quote', OWNER, { id: 'quote-request-owner', ...quoteTerms }) === 0, 'accepted quotes cannot be withdrawn or revised')
 ok(call('set_request_status', OWNER, { id: 'r-1', from: 'accepted', to: 'completed' }) === 1, 'owner completes')
 
 // --- Reviews --------------------------------------------------------------------------------

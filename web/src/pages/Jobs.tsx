@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Button, Input } from '@proappstore/sdk/ui'
 import { app, pub, q, x, CATEGORIES, type Job, type Profile } from '../api'
 import { Empty, Field, Section, Status, TextArea } from '../components'
+import { CustomerQuoteComparison, QuoteForm } from './Quotes'
 
 /** Public actions return lead-safe fields only. Owner actions carry private job detail. */
 export function Jobs() {
@@ -44,14 +45,15 @@ export function Jobs() {
 export function JobDetail({ id }: { id: string }) {
   const [publicJob, setPublicJob] = useState<Job | null | undefined>(undefined)
   const [ownJob, setOwnJob] = useState<Job | null | undefined>(undefined)
+  const [profile, setProfile] = useState<Profile | null | undefined>(undefined)
   const [editing, setEditing] = useState(false)
   const [error, setError] = useState(''); const [saving, setSaving] = useState(false)
   const load = useCallback(async () => {
     setError('')
     try {
-      const [publicRows, ownRows] = await Promise.all([pub<Job>('get_job', { id }), app.auth.user ? q<Job>('get_my_job', { id }) : Promise.resolve([] as Job[])])
-      setPublicJob(publicRows[0] ?? null); setOwnJob(ownRows[0] ?? null)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load this job.'); setPublicJob(null); setOwnJob(null) }
+      const [publicRows, ownRows, profileRows] = await Promise.all([pub<Job>('get_job', { id }), app.auth.user ? q<Job>('get_my_job', { id }) : Promise.resolve([] as Job[]), app.auth.user ? q<Profile>('get_my_profile') : Promise.resolve([] as Profile[])])
+      setPublicJob(publicRows[0] ?? null); setOwnJob(ownRows[0] ?? null); setProfile(profileRows[0] ?? null)
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load this job.'); setPublicJob(null); setOwnJob(null); setProfile(null) }
   }, [id])
   useEffect(() => { load() }, [load])
   const job = ownJob ?? publicJob
@@ -61,7 +63,7 @@ export function JobDetail({ id }: { id: string }) {
     try { const changes = await x('set_job_status', { id, from: ownJob.lifecycle, to }); if (!changes) throw new Error('This job changed before it could be updated. Refresh and try again.'); await load() }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not update this job.') } finally { setSaving(false) }
   }
-  if (publicJob === undefined || ownJob === undefined) return <Section title="Job"><p className="text-sm text-[var(--muted)]">Loading job…</p></Section>
+  if (publicJob === undefined || ownJob === undefined || profile === undefined) return <Section title="Job"><p className="text-sm text-[var(--muted)]">Loading job…</p></Section>
   if (!job) return <Section title="Job"><Empty title="This job is not available" description="It may be closed, saved as a draft, or no longer accepting leads." /></Section>
   return <Section title={job.title} action={<a href="#/jobs" className="text-sm font-semibold text-[var(--accent)]">← All jobs</a>}>
     {error ? <ErrorNotice error={error} retry={load} /> : null}
@@ -77,6 +79,8 @@ export function JobDetail({ id }: { id: string }) {
         {ownJob.lifecycle === 'closed' ? <Button loading={saving} onClick={() => transition('open')}>Re-open job</Button> : null}
       </div> : null}
     </article>
+    {ownJob ? <CustomerQuoteComparison targetType="job" targetId={ownJob.id} /> : null}
+    {!ownJob && profile?.role === 'tradie' && publicJob ? <QuoteForm targetType="job" targetId={publicJob.id} onDone={load} /> : null}
   </Section>
 }
 

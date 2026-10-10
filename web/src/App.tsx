@@ -9,6 +9,7 @@ import { OwnerDashboard, ListingForm } from './pages/Owner'
 import { Conversations, Thread } from './pages/Messages'
 import { Settings } from './pages/Settings'
 import { JobDetail, Jobs } from './pages/Jobs'
+import { Quotes } from './pages/Quotes'
 
 /**
  * Hash routes. Public: browse and listing detail (rendered without a session through
@@ -126,7 +127,7 @@ function Page({ route }: { route: Route }) {
     case 'listing': return <ListingPage id={route.id} />
     case 'saved': return <Saved />
     case 'requests': return <MyRequests />
-    case 'quotes': return <MyRequests title="Quotes" />
+    case 'quotes': return <Quotes />
     case 'inbox': return <Inbox />
     case 'mine': return <OwnerDashboard />
     case 'new': return <ListingForm />
