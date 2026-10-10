@@ -70,9 +70,9 @@ function selectedQuote(store: Store, type: 'job' | 'request', id: string) {
   return store.quotes.find((quote) => quote.target_type === type && quote.target_id === id && quote.status === 'accepted')
 }
 
-async function mockedContext(browser: Browser, role: Role, store: Store): Promise<{ context: BrowserContext; page: Page }> {
+async function mockedContext(browser: Browser, role: Role | null, store: Store): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext()
-  await context.addCookies([{ name: 'e2e_session', value: role, url: 'http://127.0.0.1:4187', sameSite: 'Lax' }])
+  if (role) await context.addCookies([{ name: 'e2e_session', value: role, url: 'http://127.0.0.1:4187', sameSite: 'Lax' }])
   const routePas = async (route: import('@playwright/test').Route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -117,13 +117,30 @@ async function mockedContext(browser: Browser, role: Role, store: Store): Promis
       case 'list_my_jobs': return json(rows(store.jobs.filter((job) => job.owner_id === currentUser.id)))
       case 'get_job': {
         const job = store.jobs.find((item) => item.id === params.id && item.lifecycle === 'open')
-        return json(rows(job ? [job] : []))
+        if (!job) return json(rows([]))
+        const { owner_id, private_address, contact_details, ...publicJob } = job
+        return json(rows([publicJob]))
       }
       case 'get_my_job': return json(rows(store.jobs.filter((job) => job.id === params.id && job.owner_id === currentUser.id)))
       case 'create_job': {
         if (currentRole !== 'customer') return json(changes(0))
         const job: Job = { id: String(params.id), lifecycle: (params.lifecycle === 'open' ? 'open' : 'draft'), title: String(params.title), description: String(params.description), category: String(params.category), location: String(params.location), private_address: String(params.private_address ?? ''), contact_details: String(params.contact_details ?? ''), created_at: now, updated_at: now, owner_id: currentUser.id }
         store.jobs.push(job); return json(changes())
+      }
+      case 'update_job': {
+        const job = store.jobs.find((item) => item.id === params.id)
+        if (currentRole !== 'customer' || !job || job.owner_id !== currentUser.id || job.lifecycle === 'closed') return json(changes(0))
+        job.title = String(params.title); job.description = String(params.description); job.category = String(params.category); job.location = String(params.location)
+        job.private_address = String(params.private_address ?? ''); job.contact_details = String(params.contact_details ?? ''); job.updated_at = now
+        return json(changes())
+      }
+      case 'set_job_status': {
+        const job = store.jobs.find((item) => item.id === params.id)
+        const to = String(params.to) as Job['lifecycle']
+        const allowed = (job?.lifecycle === 'draft' && to === 'open') || (job?.lifecycle === 'open' && to === 'closed') || (job?.lifecycle === 'closed' && to === 'open')
+        if (currentRole !== 'customer' || !job || job.owner_id !== currentUser.id || job.lifecycle !== params.from || !allowed) return json(changes(0))
+        job.lifecycle = to; job.updated_at = now
+        return json(changes())
       }
       case 'create_job_quote': {
         const job = store.jobs.find((item) => item.id === params.job_id && item.lifecycle === 'open')
@@ -245,6 +262,68 @@ test('customer job post, tradie quote, selected-work discussion, agreement and c
   await customer.page.getByRole('button', { name: 'Confirm completion' }).click()
   await expect(customer.page.getByText('Work status: completed')).toBeVisible()
   await customer.context.close(); await tradie.context.close()
+})
+
+test('customer can save, edit, publish, close and re-open a job', async ({ browser }) => {
+  const store = seed()
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/jobs')
+  await customer.page.getByRole('button', { name: 'Post a job' }).click()
+  await customer.page.getByLabel('Job title').fill('Draft bathroom repair')
+  await customer.page.getByLabel('Job details').fill('The bathroom vanity needs a repair.')
+  await customer.page.getByLabel('Service area').fill('Carlton')
+  await customer.page.getByLabel('Exact address').fill('42 Private Street')
+  await customer.page.getByLabel('Contact preference').fill('Message first')
+  await customer.page.getByRole('button', { name: 'Save draft' }).click()
+  await expect(customer.page.getByRole('link', { name: 'Draft bathroom repair', exact: true })).toBeVisible()
+  await expect(customer.page.getByText('draft', { exact: true })).toBeVisible()
+
+  const job = store.jobs[0]!
+  await customer.page.goto(`/#/jobs/${job.id}`)
+  await expect(customer.page.getByText('draft', { exact: true })).toBeVisible()
+  await customer.page.getByRole('button', { name: 'Edit job' }).click()
+  await customer.page.getByLabel('Job title').fill('Updated bathroom repair')
+  await customer.page.getByRole('button', { name: 'Save changes' }).click()
+  await expect(customer.page.getByRole('heading', { name: 'Updated bathroom repair' })).toBeVisible()
+  await customer.page.getByRole('button', { name: 'Publish job' }).click()
+  await expect(customer.page.getByText('open', { exact: true })).toBeVisible()
+  await customer.page.getByRole('button', { name: 'Close job' }).click()
+  await expect(customer.page.getByText('closed', { exact: true })).toBeVisible()
+  await customer.page.getByRole('button', { name: 'Re-open job' }).click()
+  await expect(customer.page.getByText('open', { exact: true })).toBeVisible()
+  await customer.context.close()
+})
+
+test('customers privately manage draft and closed jobs', async ({ browser }) => {
+  const store = seed()
+  store.jobs.push(
+    { id: 'draft-job', lifecycle: 'draft', title: 'Private draft job', description: 'Not a public lead yet.', category: 'plumber', location: 'Brunswick', private_address: '12 Hidden Road', contact_details: 'Call Casey', owner_id: users.customer.id, created_at: now, updated_at: now },
+    { id: 'closed-job', lifecycle: 'closed', title: 'Completed private job', description: 'No longer accepting leads.', category: 'painter', location: 'Preston', private_address: '8 Secret Avenue', contact_details: 'SMS Casey', owner_id: users.customer.id, created_at: now, updated_at: now },
+  )
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/jobs')
+  await expect(customer.page.getByRole('heading', { name: 'My jobs' })).toBeVisible()
+  await expect(customer.page.getByRole('link', { name: 'Private draft job', exact: true })).toBeVisible()
+  await expect(customer.page.getByRole('link', { name: 'Completed private job', exact: true })).toBeVisible()
+  await expect(customer.page.getByText('draft', { exact: true })).toBeVisible()
+  await expect(customer.page.getByText('closed', { exact: true })).toBeVisible()
+  await customer.page.getByRole('link', { name: 'Private draft job', exact: true }).click()
+  await expect(customer.page.getByRole('button', { name: 'Publish job' })).toBeVisible()
+  await customer.page.goto('/#/jobs/closed-job')
+  await expect(customer.page.getByRole('button', { name: 'Re-open job' })).toBeVisible()
+  await customer.context.close()
+})
+
+test('a signed-out visitor cannot see a public job’s private address or contact details', async ({ browser }) => {
+  const store = seed()
+  store.jobs.push({ id: 'public-private-job', lifecycle: 'open', title: 'Public kitchen repair', description: 'Replace a leaking kitchen mixer.', category: 'plumber', location: 'Fitzroy', private_address: '99 Secret Street', contact_details: 'Call 0400 000 000', owner_id: users.customer.id, created_at: now, updated_at: now })
+  const visitor = await mockedContext(browser, null, store)
+  await visitor.page.goto('/#/jobs/public-private-job')
+  await expect(visitor.page.getByRole('heading', { name: 'Public kitchen repair' })).toBeVisible()
+  await expect(visitor.page.getByText('99 Secret Street')).toHaveCount(0)
+  await expect(visitor.page.getByText('Call 0400 000 000')).toHaveCount(0)
+  await expect(visitor.page.getByText(/exact address and contact preferences are kept private/i)).toBeVisible()
+  await visitor.context.close()
 })
 
 test('directory direct enquiry reaches tradie quote and agreement flow without a public job', async ({ browser }) => {

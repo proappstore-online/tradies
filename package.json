@@ -11,6 +11,8 @@
     "preview": "pnpm --filter @tradies/web preview",
     "lint": "echo 'Lint configured per app; extend lintstagedrc.json with eslint/prettier'",
     "typecheck": "pnpm --filter @tradies/web exec tsc -b",
+    "test:actions": "node --no-warnings qa/actions.mjs",
+    "test:e2e": "pnpm --dir e2e exec playwright test",
     "test": "pnpm --filter @tradies/web exec tsc -b && node --no-warnings qa/foundation-contract.mjs && node --no-warnings qa/actions.mjs && node --no-warnings qa/release-contract.mjs",
     "prepare": "husky install"
   },

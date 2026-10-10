@@ -37,3 +37,19 @@ test('public jobs remain usable on a narrow mobile viewport', async ({ page }) =
   await expect(page.getByLabel('Filter jobs by location')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
 })
+
+test('signed-out public job details keep private address and contact fields out of the mobile UI', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/#/jobs')
+  const firstJob = page.locator('a[href^="#/jobs/"]').first()
+  if (!await firstJob.count()) {
+    test.skip(true, 'No open public job is currently available for a read-only release smoke.')
+    return
+  }
+  const href = await firstJob.getAttribute('href')
+  await page.goto(`/${href}`)
+  await expect(page.locator('input[aria-label="Exact address"], input[aria-label="Contact preference"]')).toHaveCount(0)
+  await expect(page.getByText('Private details — visible only to you')).toHaveCount(0)
+  await expect(page.getByText(/exact address and contact preferences are kept private/i)).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+})
