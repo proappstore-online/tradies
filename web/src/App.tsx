@@ -6,7 +6,7 @@ import { Browse, Saved } from './pages/Browse'
 import { ListingPage } from './pages/Listing'
 import { MyRequests, Inbox } from './pages/Requests'
 import { OwnerDashboard, ListingForm } from './pages/Owner'
-import { Conversations, Thread } from './pages/Messages'
+import { Conversations, Thread, WorkThread } from './pages/Messages'
 import { Settings } from './pages/Settings'
 import { JobDetail, Jobs } from './pages/Jobs'
 import { Quotes } from './pages/Quotes'
@@ -29,6 +29,7 @@ export type Route =
   | { name: 'edit'; id: string }
   | { name: 'messages' }
   | { name: 'thread'; listingId: string; otherId: string }
+  | { name: 'workThread'; targetType: 'job' | 'request'; targetId: string; otherId: string }
   | { name: 'settings' }
 
 const PUBLIC = new Set<Route['name']>(['browse', 'listing', 'jobs', 'job'])
@@ -43,6 +44,8 @@ function parseHash(): Route {
   if (m) return { name: 'edit', id: m[1]! }
   m = h.match(/^#\/messages\/([\w:-]+)\/([\w:.@-]+)$/)
   if (m) return { name: 'thread', listingId: m[1]!, otherId: m[2]! }
+  m = h.match(/^#\/work\/(job|request)\/([\w:-]+)\/([\w:.@-]+)$/)
+  if (m) return { name: 'workThread', targetType: m[1] as 'job' | 'request', targetId: m[2]!, otherId: m[3]! }
   switch (h) {
     case '#/jobs': return { name: 'jobs' }
     case '#/saved': return { name: 'saved' }
@@ -67,7 +70,7 @@ export function useRoute(): Route {
   useEffect(() => {
     const titles: Record<Route['name'], string> = {
       browse: 'Directory', jobs: 'Jobs', job: 'Job', listing: 'Tradie', saved: 'Saved', requests: `My ${REQUEST.plural}`, quotes: 'Quotes', inbox: 'Inbox',
-      mine: 'My trade profile', new: 'Add service', edit: 'Edit service', messages: 'Inbox', thread: 'Conversation', settings: 'Settings',
+      mine: 'My trade profile', new: 'Add service', edit: 'Edit service', messages: 'Inbox', thread: 'Conversation', workThread: 'Work conversation', settings: 'Settings',
     }
     document.title = `${titles[route.name]} — Tradies`
     window.scrollTo(0, 0)
@@ -134,6 +137,7 @@ function Page({ route }: { route: Route }) {
     case 'edit': return <ListingForm id={route.id} />
     case 'messages': return <Conversations />
     case 'thread': return <Thread listingId={route.listingId} otherId={route.otherId} />
+    case 'workThread': return <WorkThread targetType={route.targetType} targetId={route.targetId} otherId={route.otherId} />
     case 'settings': return <Settings />
   }
 }
@@ -156,7 +160,7 @@ function navFor(role: Role): NavItem[] {
     { label: 'Directory', href: '#/' },
     { label: 'Jobs', href: '#/jobs' },
     { label: 'Quotes', href: '#/quotes' },
-    { label: 'Inbox', href: role === 'tradie' ? '#/inbox' : '#/messages' },
+    { label: 'Inbox', href: '#/messages' },
     { label: 'Saved', href: '#/saved' },
     ...(role === 'tradie' ? [{ label: 'My trade profile', href: '#/mine' }] : []),
     { label: 'Settings', href: '#/settings' },

@@ -105,6 +105,40 @@ export interface Conversation {
   last_at: number
 }
 
+/** A conversation unlocked by a selected quote. Unlike listing chat, it is keyed to exactly one job or enquiry. */
+export interface WorkConversation {
+  target_type: 'job' | 'request'
+  target_id: string
+  quote_id: string
+  title: string
+  other_id: string
+  other_name: string
+  last_at: number
+}
+
+export interface WorkMessage {
+  id: string
+  target_type: 'job' | 'request'
+  target_id: string
+  sender_id: string
+  sender_name: string
+  recipient_id: string
+  body: string
+  created_at: number
+}
+
+export type WorkAgreementStatus = 'agreed' | 'customer_completed' | 'tradie_completed' | 'completed'
+
+export interface WorkAgreement {
+  target_type: 'job' | 'request'
+  target_id: string
+  quote_id: string
+  status: WorkAgreementStatus
+  agreed_at: number
+  updated_at: number
+  completed_at: number | null
+}
+
 export interface Review {
   id: string
   listing_id: string

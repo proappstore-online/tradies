@@ -131,6 +131,17 @@ ok(call('decline_quote', SEEKER, { id: 'quote-job-late', from: 'submitted' }) ==
 db.prepare("INSERT INTO quotes (id, target_type, target_id, customer_id, tradie_id, status, scope, amount, currency, timing, valid_until, notes, created_at, updated_at) VALUES ('quote-expired-seeded', 'job', 'job-1', ?, ?, 'submitted', 'Scope', 1, 'AUD', 'Tomorrow', ?, '', ?, ?)").run(SEEKER, 'gh:expired', Date.now() - 1, Date.now(), Date.now())
 ok(call('accept_quote', SEEKER, { id: 'quote-expired-seeded', from: 'submitted' }) === 0, 'an expired quote cannot be newly accepted')
 
+// --- Selected public-job work: selected tradie and customer only ----------------------------
+ok(call('list_work_conversations', SEEKER).some((c) => c.target_type === 'job' && c.target_id === 'job-1') && call('list_work_conversations', RIVAL).some((c) => c.target_type === 'job' && c.target_id === 'job-1'), 'selected job quote creates a private work thread for exactly its participants')
+ok(call('list_work_messages', OWNER, { target_type: 'job', target_id: 'job-1', other_id: SEEKER }).length === 0 && call('list_work_messages', STRANGER, { target_type: 'job', target_id: 'job-1', other_id: RIVAL }).length === 0, 'other tradies and unrelated users cannot read selected job work history')
+ok(call('send_work_message', OWNER, { id: 'job-other-tradie-message', target_type: 'job', target_id: 'job-1', recipient_id: SEEKER, sender_name: 'Olive', body: 'Pick me instead' }) === 0 && call('send_work_message', STRANGER, { id: 'job-stranger-message', target_type: 'job', target_id: 'job-1', recipient_id: RIVAL, sender_name: 'Stan', body: 'Hello' }) === 0, 'other tradies and unrelated users cannot send to selected job work thread')
+const jobMessage = { id: 'job-message-1', target_type: 'job', target_id: 'job-1', recipient_id: RIVAL, sender_name: 'Sam', body: 'Can we confirm the timing?' }
+ok(call('send_work_message', SEEKER, jobMessage) === 1 && call('send_work_message', SEEKER, jobMessage) === 0 && call('list_work_messages', RIVAL, { target_type: 'job', target_id: 'job-1', other_id: SEEKER }).length === 1, 'selected job messages persist, are visible to both participants, and client-id retries do not duplicate them')
+ok(call('agree_work', RIVAL, { quote_id: 'quote-job-rival' }) === 0 && call('agree_work', STRANGER, { quote_id: 'quote-job-rival' }) === 0, 'only the job customer can agree to selected work')
+ok(call('agree_work', SEEKER, { quote_id: 'quote-job-rival' }) === 1 && call('agree_work', SEEKER, { quote_id: 'quote-job-rival' }) === 0, 'job agreement is created once and safe on retry')
+ok(call('complete_work', STRANGER, { target_type: 'job', target_id: 'job-1', from: 'agreed' }) === 0 && call('complete_work', OWNER, { target_type: 'job', target_id: 'job-1', from: 'agreed' }) === 0, 'non-participants cannot confirm selected job completion')
+ok(call('complete_work', SEEKER, { target_type: 'job', target_id: 'job-1', from: 'agreed' }) === 1 && call('complete_work', SEEKER, { target_type: 'job', target_id: 'job-1', from: 'customer_completed' }) === 0 && call('complete_work', RIVAL, { target_type: 'job', target_id: 'job-1', from: 'customer_completed' }) === 1 && call('get_work_agreement', SEEKER, { target_type: 'job', target_id: 'job-1' })[0]?.status === 'completed', 'job completion requires each participant once and cannot be duplicated or skipped')
+
 // --- Listings -------------------------------------------------------------------------------
 ok(call('create_listing', OWNER, { id: 'invalid-service', owner_name: 'Olive', title: 'Missing details', category: 'plumber' }) === 0, 'a profile needs a trade, service area and description')
 ok(call('create_listing', OWNER, { id: L, owner_name: 'Olive', title: 'Olive Plumbing', description: 'Licensed plumbing repairs and installations.', category: 'plumber', location: 'Northside' }) === 1, 'tradie publishes a validated service profile')
@@ -174,6 +185,11 @@ ok(call('list_request_quotes', STRANGER, { request_id: 'r-1' }).length === 0 && 
 ok(call('decline_quote', STRANGER, { id: 'quote-request-owner', from: 'submitted' }) === 0, 'a stranger cannot decline another customer’s quote')
 ok(call('accept_quote', SEEKER, { id: 'quote-request-owner', from: 'submitted' }) === 1, 'customer accepts a direct-enquiry quote')
 ok(call('withdraw_quote', OWNER, { id: 'quote-request-owner', from: 'accepted' }) === 0 && call('revise_quote', OWNER, { id: 'quote-request-owner', ...quoteTerms }) === 0, 'accepted quotes cannot be withdrawn or revised')
+ok(call('list_work_messages', RIVAL, { target_type: 'request', target_id: 'r-1', other_id: SEEKER }).length === 0 && call('send_work_message', RIVAL, { id: 'request-rival-message', target_type: 'request', target_id: 'r-1', recipient_id: SEEKER, sender_name: 'Riley', body: 'Not my enquiry' }) === 0, 'other tradies cannot access a direct-enquiry selected-work thread')
+const requestMessage = { id: 'request-message-1', target_type: 'request', target_id: 'r-1', recipient_id: OWNER, sender_name: 'Sam', body: 'The scope looks good.' }
+ok(call('send_work_message', SEEKER, requestMessage) === 1 && call('send_work_message', SEEKER, requestMessage) === 0 && call('list_work_messages', OWNER, { target_type: 'request', target_id: 'r-1', other_id: SEEKER }).length === 1, 'direct-enquiry participants retain one refresh-persistent message history without retry duplicates')
+ok(call('agree_work', SEEKER, { quote_id: 'quote-request-owner' }) === 1 && call('complete_work', OWNER, { target_type: 'request', target_id: 'r-1', from: 'agreed' }) === 1 && call('complete_work', SEEKER, { target_type: 'request', target_id: 'r-1', from: 'tradie_completed' }) === 1 && call('get_work_agreement', OWNER, { target_type: 'request', target_id: 'r-1' })[0]?.status === 'completed', 'direct-enquiry participants can agree then confirm completion in either order')
+ok(call('get_work_agreement', STRANGER, { target_type: 'request', target_id: 'r-1' }).length === 0 && call('complete_work', STRANGER, { target_type: 'request', target_id: 'r-1', from: 'completed' }) === 0, 'unrelated users cannot read or transition direct-enquiry agreements')
 ok(call('set_request_status', OWNER, { id: 'r-1', from: 'accepted', to: 'completed' }) === 1, 'owner completes')
 
 // --- Reviews --------------------------------------------------------------------------------
@@ -190,7 +206,7 @@ ok(call('send_message', STRANGER, { listing_id: L, recipient_id: SEEKER, sender_
 ok(call('send_message', OWNER, { listing_id: L, recipient_id: OWNER, sender_name: 'Olive', body: 'Me' }) === 0, 'messaging yourself is refused')
 ok(call('list_messages', STRANGER, { listing_id: L, other_id: OWNER }).length === 0, 'a stranger reads nothing from the thread')
 ok(call('block_user', SEEKER, { blocked_id: OWNER }) === 1, 'seeker blocks the owner')
-ok(call('send_message', OWNER, { listing_id: L, recipient_id: SEEKER, sender_name: 'Olive', body: 'Hello?' }) === 0, 'a blocked owner cannot message')
+ok(call('send_message', OWNER, { listing_id: L, recipient_id: SEEKER, sender_name: 'Olive', body: 'Hello?' }) === 0 && call('send_work_message', OWNER, { id: 'blocked-work-message', target_type: 'request', target_id: 'r-1', recipient_id: SEEKER, sender_name: 'Olive', body: 'Hello?' }) === 0, 'a blocked owner cannot send listing or selected-work messages')
 ok(call('create_request', SEEKER, { id: 'r-3', listing_id: L, requester_name: 'Sam' }) === 0, 'blocks also close requests')
 ok(call('unblock_user', STRANGER, { blocked_id: OWNER }) === 0, 'only the blocker can unblock')
 ok(call('block_user', SEEKER, { blocked_id: SEEKER }) === 0 && call('report_user', SEEKER, { reported_id: SEEKER, reason: 'spam' }) === 0, 'self-block and self-report are refused')

@@ -697,6 +697,54 @@
       "requires_auth": true
     },
     {
+      "name": "list_work_conversations",
+      "description": "The caller's participant-only conversations for selected quotes, including empty threads. A public-job thread is available only to its customer and selected tradie; a direct-enquiry thread is available only to its enquirer and tradie.",
+      "operation": "query",
+      "sql": "SELECT q.target_type, q.target_id, q.id AS quote_id, CASE WHEN q.target_type = 'job' THEN j.title ELSE l.title END AS title, CASE WHEN q.customer_id = :__user_id THEN q.tradie_id ELSE q.customer_id END AS other_id, COALESCE(MAX(CASE WHEN m.sender_id != :__user_id THEN m.sender_name END), '') AS other_name, MAX(COALESCE(m.created_at, q.accepted_at)) AS last_at FROM quotes q LEFT JOIN work_messages m ON m.target_type = q.target_type AND m.target_id = q.target_id LEFT JOIN jobs j ON q.target_type = 'job' AND j.id = q.target_id LEFT JOIN requests r ON q.target_type = 'request' AND r.id = q.target_id LEFT JOIN listings l ON r.listing_id = l.id WHERE q.status = 'accepted' AND (q.customer_id = :__user_id OR q.tradie_id = :__user_id) GROUP BY q.target_type, q.target_id, q.id, q.customer_id, q.tradie_id, j.title, l.title ORDER BY last_at DESC LIMIT 100",
+      "params": {},
+      "requires_auth": true
+    },
+    {
+      "name": "list_work_messages",
+      "description": "Read a selected-quote work thread, oldest first. The server verifies that the caller and other user are exactly that quote's customer and tradie before returning any persisted history.",
+      "operation": "query",
+      "sql": "SELECT m.id, m.target_type, m.target_id, m.sender_id, m.sender_name, m.recipient_id, m.body, m.created_at FROM work_messages m WHERE m.target_type = :target_type AND m.target_id = :target_id AND ((m.sender_id = :__user_id AND m.recipient_id = :other_id) OR (m.sender_id = :other_id AND m.recipient_id = :__user_id)) AND EXISTS (SELECT 1 FROM quotes q WHERE q.target_type = :target_type AND q.target_id = :target_id AND q.status = 'accepted' AND ((q.customer_id = :__user_id AND q.tradie_id = :other_id) OR (q.tradie_id = :__user_id AND q.customer_id = :other_id))) ORDER BY m.created_at ASC LIMIT 500",
+      "params": { "target_type": { "type": "string", "description": "job | request" }, "target_id": { "type": "string", "description": "Job or direct enquiry id" }, "other_id": { "type": "string", "description": "The selected quote's other participant" } },
+      "requires_auth": true
+    },
+    {
+      "name": "send_work_message",
+      "description": "Send one persisted message in a selected-quote work thread. The caller supplies an id for safe retry: repeats do not create another message. Blocks prevent sends.",
+      "operation": "execute",
+      "sql": "INSERT OR IGNORE INTO work_messages (id, target_type, target_id, sender_id, sender_name, recipient_id, body, created_at) SELECT :id, :target_type, :target_id, :__user_id, :sender_name, :recipient_id, :body, :__now WHERE :target_type IN ('job', 'request') AND :recipient_id != :__user_id AND length(trim(:sender_name)) BETWEEN 1 AND 120 AND length(trim(:body)) BETWEEN 1 AND 2000 AND EXISTS (SELECT 1 FROM quotes q WHERE q.target_type = :target_type AND q.target_id = :target_id AND q.status = 'accepted' AND ((q.customer_id = :__user_id AND q.tradie_id = :recipient_id) OR (q.tradie_id = :__user_id AND q.customer_id = :recipient_id))) AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = :recipient_id) OR (b.blocker_id = :recipient_id AND b.blocked_id = :__user_id))",
+      "params": { "id": { "type": "string", "description": "Client-generated message id; retry with the same id" }, "target_type": { "type": "string", "description": "job | request" }, "target_id": { "type": "string", "description": "Job or direct enquiry id" }, "recipient_id": { "type": "string", "description": "The selected quote's other participant" }, "sender_name": { "type": "string", "description": "Display name shown to the other participant" }, "body": { "type": "string", "description": "Message text" } },
+      "requires_auth": true
+    },
+    {
+      "name": "get_work_agreement",
+      "description": "Read the arrangement state for a selected quote. Only the customer and selected tradie may read it.",
+      "operation": "query",
+      "sql": "SELECT target_type, target_id, quote_id, status, agreed_at, updated_at, completed_at FROM work_agreements WHERE target_type = :target_type AND target_id = :target_id AND (:__user_id = customer_id OR :__user_id = tradie_id) LIMIT 1",
+      "params": { "target_type": { "type": "string", "description": "job | request" }, "target_id": { "type": "string", "description": "Job or direct enquiry id" } },
+      "requires_auth": true
+    },
+    {
+      "name": "agree_work",
+      "description": "The customer records agreement to work based on their selected quote. It is idempotent by target, never creates a payment or escrow obligation, and is refused for anyone else.",
+      "operation": "execute",
+      "sql": "INSERT OR IGNORE INTO work_agreements (target_type, target_id, quote_id, customer_id, tradie_id, status, agreed_at, updated_at) SELECT q.target_type, q.target_id, q.id, q.customer_id, q.tradie_id, 'agreed', :__now, :__now FROM quotes q WHERE q.id = :quote_id AND q.status = 'accepted' AND q.customer_id = :__user_id AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = q.customer_id AND b.blocked_id = q.tradie_id) OR (b.blocker_id = q.tradie_id AND b.blocked_id = q.customer_id))",
+      "params": { "quote_id": { "type": "string", "description": "The accepted quote the customer is agreeing to" } },
+      "requires_auth": true
+    },
+    {
+      "name": "complete_work",
+      "description": "Record one participant's completion confirmation. Customer and selected tradie each confirm once; the second confirmation moves the arrangement to completed. State guards make stale retries no-ops.",
+      "operation": "execute",
+      "sql": "UPDATE work_agreements SET status = CASE WHEN status = 'agreed' AND customer_id = :__user_id THEN 'customer_completed' WHEN status = 'agreed' AND tradie_id = :__user_id THEN 'tradie_completed' WHEN status = 'customer_completed' AND tradie_id = :__user_id THEN 'completed' WHEN status = 'tradie_completed' AND customer_id = :__user_id THEN 'completed' END, updated_at = :__now, completed_at = CASE WHEN (status = 'customer_completed' AND tradie_id = :__user_id) OR (status = 'tradie_completed' AND customer_id = :__user_id) THEN :__now ELSE completed_at END WHERE target_type = :target_type AND target_id = :target_id AND status = :from AND ((status = 'agreed' AND (:__user_id = customer_id OR :__user_id = tradie_id)) OR (status = 'customer_completed' AND :__user_id = tradie_id) OR (status = 'tradie_completed' AND :__user_id = customer_id))",
+      "params": { "target_type": { "type": "string", "description": "job | request" }, "target_id": { "type": "string", "description": "Job or direct enquiry id" }, "from": { "type": "string", "description": "Current agreement state last observed by the caller" } },
+      "requires_auth": true
+    },
+    {
       "name": "report_user",
       "description": "Report another user, optionally about a specific listing. Reports are reviewed by the app owner (read with the platform's owner tooling, never exposed in-app).",
       "operation": "execute",
