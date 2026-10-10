@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, Modal } from '@proappstore/sdk/ui'
-import { app, pub, q, x, images, imageUrl, when, MAPS_ENABLED, REQUEST, type Listing, type Review } from '../api'
+import { app, pub, q, x, images, imageUrl, when, MAPS_ENABLED, REQUEST, type Listing, type Profile, type Review } from '../api'
 import { Empty, Field, Section, Stars, TextArea } from '../components'
 import { useSaved } from './Browse'
 
@@ -15,6 +15,8 @@ export function ListingPage({ id }: { id: string }) {
   const [rating, setRating] = useState(5)
   const [comment, setComment] = useState('')
   const [flash, setFlash] = useState('')
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [error, setError] = useState('')
   const { saved, toggle, signedIn } = useSaved()
   const user = app.auth.user
 
@@ -27,11 +29,18 @@ export function ListingPage({ id }: { id: string }) {
     setListing(rows[0] ?? null)
     setReviews(rv)
     setStats(st[0] ?? { review_count: 0, avg_rating: null })
-    if (user) setReviewable((await q<{ request_id: string }>('can_review', { listing_id: id })).map((r) => r.request_id))
+    if (user) {
+      const [reviewRows, profileRows] = await Promise.all([
+        q<{ request_id: string }>('can_review', { listing_id: id }),
+        q<Profile>('get_my_profile'),
+      ])
+      setReviewable(reviewRows.map((r) => r.request_id))
+      setProfile(profileRows[0] ?? null)
+    }
   }
-  useEffect(() => { refresh() }, [id])
+  useEffect(() => { refresh().catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load this tradie profile.')) }, [id])
 
-  if (listing === undefined) return <Section title="Tradie"><p className="text-sm text-[var(--muted)]">Loading…</p></Section>
+  if (listing === undefined) return <Section title="Tradie">{error ? <div role="alert" className="flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--danger)] p-3 text-sm text-[var(--danger)]"><span>{error}</span><Button variant="ghost" size="sm" onClick={() => { setError(''); refresh().catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load this tradie profile.')) }}>Try again</Button></div> : <p className="text-sm text-[var(--muted)]">Loading…</p>}</Section>
   if (listing === null) return <Section title="Tradie"><Empty title="This tradie profile is not available" description="It may have been paused or archived by its owner." /></Section>
 
   const mine = user?.id === listing.owner_id
@@ -39,10 +48,14 @@ export function ListingPage({ id }: { id: string }) {
 
   async function sendRequest() {
     if (!user) return
-    const changes = await x('create_request', { id: crypto.randomUUID(), listing_id: id, requester_name: user.name, note })
-    setAsking(false)
-    setNote('')
-    setFlash(changes ? `${REQUEST.verb} sent. The owner will see it in their inbox.` : `Could not send: you may already have an open ${REQUEST.noun} here.`)
+    try {
+      const changes = await x('create_request', { id: crypto.randomUUID(), listing_id: id, requester_name: user.name, note: note.trim() })
+      setAsking(false)
+      setNote('')
+      setFlash(changes ? `${REQUEST.verb} sent privately. The tradie can reply from their inbox.` : `Could not send: you may already have an open ${REQUEST.noun} here.`)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : `Could not send this ${REQUEST.noun}.`)
+    }
   }
 
   async function submitReview() {
@@ -73,13 +86,14 @@ export function ListingPage({ id }: { id: string }) {
 
       <div className="mt-6 flex flex-wrap gap-2">
         {mine ? <Button variant="secondary" onClick={() => { location.hash = `#/mine/${id}/edit` }}>Edit service</Button> : null}
-        {!mine && signedIn ? <Button onClick={() => setAsking(true)}>{REQUEST.verb}</Button> : null}
-        {!mine && signedIn ? <Button variant="secondary" onClick={() => { location.hash = `#/messages/${id}/${listing.owner_id}` }}>Message tradie</Button> : null}
+        {!mine && signedIn && profile?.role === 'customer' ? <Button onClick={() => setAsking(true)}>{REQUEST.verb}</Button> : null}
+        {!mine && signedIn && profile?.role === 'tradie' ? <p className="self-center text-sm text-[var(--muted)]">Only customers can send direct enquiries.</p> : null}
         {!mine && !signedIn ? <Button onClick={() => app.auth.signIn()}>Sign in to {REQUEST.noun}</Button> : null}
         {reviewable.length ? <Button variant="secondary" onClick={() => setReviewing(true)}>Leave a review</Button> : null}
         {!mine && signedIn ? <a href="#/settings" className="self-center text-xs text-[var(--muted)] underline-offset-4 hover:underline">Block or report this tradie</a> : null}
       </div>
       {flash ? <p role="status" className="mt-3 text-sm text-[var(--success)]">{flash}</p> : null}
+      {error ? <p role="alert" className="mt-3 text-sm text-[var(--danger)]">{error}</p> : null}
 
       <h2 className="display-font mt-8 text-xl font-semibold text-[var(--ink)]">Reviews</h2>
       {reviews.length === 0 ? <p className="mt-2 text-sm text-[var(--muted)]">No reviews yet. Reviews open after a completed {REQUEST.noun}.</p> : null}
@@ -93,8 +107,8 @@ export function ListingPage({ id }: { id: string }) {
       </ul>
 
       <Modal open={asking} onClose={() => setAsking(false)} title={`${REQUEST.verb}: ${listing.title}`}>
-        <Field label="Private note to the tradie"><TextArea aria-label="Note to the tradie" rows={4} placeholder="Describe the work or ask a question. Share precise address details only privately." value={note} onChange={(e) => setNote(e.target.value)} /></Field>
-        <div className="mt-4 flex justify-end gap-2"><Button variant="ghost" onClick={() => setAsking(false)}>Cancel</Button><Button onClick={sendRequest}>Send</Button></div>
+        <Field label="Private note to the tradie"><TextArea aria-label="Note to the tradie" required maxLength={2000} rows={4} placeholder="Describe the work or ask a question. Share precise address details only privately." value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        <div className="mt-4 flex justify-end gap-2"><Button variant="ghost" onClick={() => setAsking(false)}>Cancel</Button><Button disabled={!note.trim()} onClick={sendRequest}>Send</Button></div>
       </Modal>
       <Modal open={reviewing} onClose={() => setReviewing(false)} title="Your review">
         <Field label="Rating">

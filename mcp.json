@@ -2,13 +2,18 @@
   "tools": [
     {
       "name": "list_listings",
-      "description": "Public Tradies directory, newest first. Only active tradie profiles; keyset pagination \u2014 pass the last row's created_at as `before` for the next page. No personal data beyond the tradie's chosen display name and public service area.",
+      "description": "Public Tradies directory, newest first. Only active tradie profiles; filter by trade and broad service area, with keyset pagination. No personal data beyond the tradie's chosen display name and public service area.",
       "operation": "query",
-      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at FROM listings WHERE status = 'active' AND (:category IS NULL OR category = :category) AND (:before IS NULL OR created_at < :before) ORDER BY created_at DESC LIMIT 24",
+      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at FROM listings WHERE status = 'active' AND (:category IS NULL OR category = :category) AND (:location IS NULL OR lower(location) LIKE '%' || lower(:location) || '%') AND (:before IS NULL OR created_at < :before) ORDER BY created_at DESC LIMIT 24",
       "params": {
         "category": {
           "type": "string",
           "description": "Filter by category",
+          "optional": true
+        },
+        "location": {
+          "type": "string",
+          "description": "Broad service area substring",
           "optional": true
         },
         "before": {
@@ -94,9 +99,9 @@
     },
     {
       "name": "create_listing",
-      "description": "Publish a public tradie profile owned by the caller. Only a caller who selected the tradie role may create one. Idempotent under retry: the client supplies the id and a repeat is ignored (meta.changes = 0).",
+      "description": "Publish a public tradie profile owned by the caller. Trade, broad service area and description are required. Only a caller who selected the tradie role may create one. Idempotent under retry: the client supplies the id and a repeat is ignored (meta.changes = 0).",
       "operation": "execute",
-      "sql": "INSERT OR IGNORE INTO listings (id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at) SELECT :id, :__user_id, :owner_name, 'active', :title, :description, :category, :location, :lat, :lng, :images, :__now, :__now WHERE EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'tradie')",
+      "sql": "INSERT OR IGNORE INTO listings (id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at) SELECT :id, :__user_id, :owner_name, 'active', :title, :description, :category, :location, :lat, :lng, :images, :__now, :__now WHERE EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'tradie') AND length(trim(:title)) BETWEEN 1 AND 120 AND length(trim(:description)) BETWEEN 1 AND 4000 AND :category IN ('plumber', 'electrician', 'carpenter', 'painter', 'landscaper', 'builder', 'cleaner', 'other') AND length(trim(:location)) BETWEEN 1 AND 120 AND length(trim(:owner_name)) BETWEEN 1 AND 120",
       "params": {
         "id": {
           "type": "string",
@@ -145,9 +150,9 @@
     },
     {
       "name": "update_listing",
-      "description": "Edit one of the caller's own listings.",
+      "description": "Edit one of the caller's own tradie profiles. Trade, broad service area and description remain required.",
       "operation": "execute",
-      "sql": "UPDATE listings SET title = :title, description = :description, category = :category, location = :location, lat = :lat, lng = :lng, images = :images, updated_at = :__now WHERE id = :id AND owner_id = :__user_id AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'tradie')",
+      "sql": "UPDATE listings SET title = :title, description = :description, category = :category, location = :location, lat = :lat, lng = :lng, images = :images, updated_at = :__now WHERE id = :id AND owner_id = :__user_id AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'tradie') AND length(trim(:title)) BETWEEN 1 AND 120 AND length(trim(:description)) BETWEEN 1 AND 4000 AND :category IN ('plumber', 'electrician', 'carpenter', 'painter', 'landscaper', 'builder', 'cleaner', 'other') AND length(trim(:location)) BETWEEN 1 AND 120",
       "params": {
         "id": {
           "type": "string",
@@ -255,9 +260,9 @@
     },
     {
       "name": "create_request",
-      "description": "Send a private enquiry to a tradie profile. Refused silently (meta.changes = 0) when: the profile is not active, roles are not customer-to-tradie, the caller owns it, either side has blocked the other, or the caller already has an open enquiry on it. Idempotent under retry by client id.",
+      "description": "Send a private direct enquiry to a tradie profile; it does not create a public job. Refused silently (meta.changes = 0) when: the profile is not active, roles are not customer-to-tradie, the caller owns it, either side has blocked the other, the message is invalid, or the caller already has an open enquiry on it. Idempotent under retry by client id.",
       "operation": "execute",
-      "sql": "INSERT OR IGNORE INTO requests (id, listing_id, requester_id, requester_name, status, note, created_at, updated_at) SELECT :id, :listing_id, :__user_id, :requester_name, 'pending', :note, :__now, :__now FROM listings l WHERE l.id = :listing_id AND l.status = 'active' AND l.owner_id != :__user_id AND EXISTS (SELECT 1 FROM profiles customer WHERE customer.user_id = :__user_id AND customer.role = 'customer') AND EXISTS (SELECT 1 FROM profiles tradie WHERE tradie.user_id = l.owner_id AND tradie.role = 'tradie') AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = l.owner_id) OR (b.blocker_id = l.owner_id AND b.blocked_id = :__user_id)) AND NOT EXISTS (SELECT 1 FROM requests r WHERE r.listing_id = :listing_id AND r.requester_id = :__user_id AND r.status IN ('pending', 'accepted'))",
+      "sql": "INSERT OR IGNORE INTO requests (id, listing_id, requester_id, requester_name, status, note, created_at, updated_at) SELECT :id, :listing_id, :__user_id, :requester_name, 'pending', :note, :__now, :__now FROM listings l WHERE l.id = :listing_id AND l.status = 'active' AND l.owner_id != :__user_id AND EXISTS (SELECT 1 FROM profiles customer WHERE customer.user_id = :__user_id AND customer.role = 'customer') AND EXISTS (SELECT 1 FROM profiles tradie WHERE tradie.user_id = l.owner_id AND tradie.role = 'tradie') AND length(trim(:requester_name)) BETWEEN 1 AND 120 AND length(trim(:note)) BETWEEN 1 AND 2000 AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = l.owner_id) OR (b.blocker_id = l.owner_id AND b.blocked_id = :__user_id)) AND NOT EXISTS (SELECT 1 FROM requests r WHERE r.listing_id = :listing_id AND r.requester_id = :__user_id AND r.status IN ('pending', 'accepted'))",
       "params": {
         "id": {
           "type": "string",
@@ -306,9 +311,9 @@
     },
     {
       "name": "list_incoming_requests",
-      "description": "Requests on the caller's listings (owner view), newest first.",
+      "description": "Private direct enquiries received by the caller as a tradie, newest first. Only their own profiles' enquiries are returned.",
       "operation": "query",
-      "sql": "SELECT r.id, r.listing_id, r.requester_id, r.requester_name, r.status, r.note, r.created_at, r.updated_at, l.title AS listing_title FROM requests r JOIN listings l ON l.id = r.listing_id WHERE l.owner_id = :__user_id ORDER BY r.created_at DESC LIMIT 200",
+      "sql": "SELECT r.id, r.listing_id, r.requester_id, r.requester_name, r.status, r.note, r.created_at, r.updated_at, l.title AS listing_title FROM requests r JOIN listings l ON l.id = r.listing_id WHERE l.owner_id = :__user_id AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'tradie') ORDER BY r.created_at DESC LIMIT 200",
       "params": {},
       "requires_auth": true
     },
@@ -335,9 +340,9 @@
     },
     {
       "name": "send_message",
-      "description": "Send a message about a listing. Threads always run between the listing's owner and one other person; refused (meta.changes = 0) when neither party owns the listing, when messaging yourself, or when either side has blocked the other.",
+      "description": "Send a private message after a direct enquiry. Threads only run between that enquiry's customer and tradie; blocks are enforced here as well as on enquiries.",
       "operation": "execute",
-      "sql": "INSERT INTO messages (id, listing_id, sender_id, sender_name, recipient_id, body, created_at) SELECT :__uuid, :listing_id, :__user_id, :sender_name, :recipient_id, :body, :__now WHERE :recipient_id != :__user_id AND EXISTS (SELECT 1 FROM listings l WHERE l.id = :listing_id AND (l.owner_id = :__user_id OR l.owner_id = :recipient_id)) AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = :recipient_id) OR (b.blocker_id = :recipient_id AND b.blocked_id = :__user_id))",
+      "sql": "INSERT INTO messages (id, listing_id, sender_id, sender_name, recipient_id, body, created_at) SELECT :__uuid, :listing_id, :__user_id, :sender_name, :recipient_id, :body, :__now WHERE :recipient_id != :__user_id AND length(trim(:sender_name)) BETWEEN 1 AND 120 AND length(trim(:body)) BETWEEN 1 AND 2000 AND EXISTS (SELECT 1 FROM requests r JOIN listings l ON l.id = r.listing_id WHERE r.listing_id = :listing_id AND ((r.requester_id = :__user_id AND l.owner_id = :recipient_id) OR (l.owner_id = :__user_id AND r.requester_id = :recipient_id))) AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = :recipient_id) OR (b.blocker_id = :recipient_id AND b.blocked_id = :__user_id))",
       "params": {
         "listing_id": {
           "type": "string",

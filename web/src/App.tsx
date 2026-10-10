@@ -151,7 +151,7 @@ function navFor(role: Role): NavItem[] {
     { label: 'Directory', href: '#/' },
     { label: 'Jobs', href: '#/jobs' },
     { label: 'Quotes', href: '#/quotes' },
-    { label: 'Inbox', href: '#/messages' },
+    { label: 'Inbox', href: role === 'tradie' ? '#/inbox' : '#/messages' },
     { label: 'Saved', href: '#/saved' },
     ...(role === 'tradie' ? [{ label: 'My trade profile', href: '#/mine' }] : []),
     { label: 'Settings', href: '#/settings' },

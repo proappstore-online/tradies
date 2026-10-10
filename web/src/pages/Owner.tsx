@@ -71,7 +71,11 @@ export function ListingForm({ id }: { id?: string }) {
   async function submit(e: FormEvent) {
     e.preventDefault()
     const user = app.auth.user
-    if (!user || !draft.title.trim()) return
+    if (!user) return
+    if (!draft.title.trim() || !draft.description.trim() || !draft.location.trim()) {
+      setError('Add a service name, description and broad service area before publishing.')
+      return
+    }
     setBusy(true)
     setError('')
     try {
@@ -100,15 +104,15 @@ export function ListingForm({ id }: { id?: string }) {
   return (
     <Section title={id ? 'Edit service' : 'Add a service'}>
       <form onSubmit={submit} className="max-w-xl space-y-4">
-        <Field label="Title"><Input aria-label="Title" required maxLength={120} value={draft.title} onChange={(e) => set({ title: e.target.value })} /></Field>
-        <Field label="Description"><TextArea aria-label="Description" rows={6} maxLength={4000} value={draft.description} onChange={(e) => set({ description: e.target.value })} /></Field>
+        <Field label="Business or service name"><Input aria-label="Business or service name" required maxLength={120} value={draft.title} onChange={(e) => set({ title: e.target.value })} /></Field>
+        <Field label="Description"><TextArea aria-label="Description" required rows={6} maxLength={4000} placeholder="Describe the work you offer. Do not put a street address or contact details here." value={draft.description} onChange={(e) => set({ description: e.target.value })} /></Field>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Category">
             <select aria-label="Category" value={draft.category} onChange={(e) => set({ category: e.target.value })} className="w-full rounded-[var(--radius-sm)] border border-[var(--line-strong)] bg-[var(--panel-strong)] px-3 py-2 text-sm text-[var(--ink)]">
               {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </Field>
-          <Field label="Service area"><Input aria-label="Service area" placeholder="Suburb, city or region" value={draft.location} onChange={(e) => set({ location: e.target.value })} /></Field>
+          <Field label="Broad service area"><Input aria-label="Broad service area" required maxLength={120} placeholder="Suburb, city or region" value={draft.location} onChange={(e) => set({ location: e.target.value })} /></Field>
         </div>
         <Field label="Photos (up to 6)">
           <input aria-label="Photos" type="file" accept="image/*" multiple onChange={(e) => addPhotos(e.target.files)} className="block text-sm text-[var(--muted)]" />
