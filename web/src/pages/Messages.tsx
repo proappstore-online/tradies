@@ -31,7 +31,8 @@ function useThreadScroll(rowCount: number) {
     const saved = pending.current
     pending.current = null
     if (!saved || saved.mode === 'bottom') node.scrollTop = node.scrollHeight
-    else node.scrollTop = saved.top + node.scrollHeight - saved.height
+    else if (saved.mode === 'older') node.scrollTop = saved.top + node.scrollHeight - saved.height
+    else node.scrollTop = saved.top
   }, [rowCount])
   return { box, snapshot, snapshotForLatest }
 }

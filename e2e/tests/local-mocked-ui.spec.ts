@@ -373,6 +373,61 @@ test('direct and selected-work threads page tied timestamps without losing histo
   await customer.context.close()
 })
 
+test('polling preserves a reader anchor while older pages compensate for prepended height in direct and selected-work threads', async ({ browser }) => {
+  const store = seed()
+  store.requests.push({ id: 'scroll-enquiry', listing_id: store.listing.id, requester_id: users.customer.id, requester_name: users.customer.name, status: 'pending', note: 'Scroll preservation fixture.', created_at: now, updated_at: now, listing_title: store.listing.title, owner_id: users.tradie.id, owner_name: users.tradie.name })
+  for (let index = 0; index < 201; index++) store.directMessages.push({ id: `scroll-direct-${String(index).padStart(3, '0')}`, listing_id: store.listing.id, sender_id: users.customer.id, sender_name: users.customer.name, recipient_id: users.tradie.id, body: `Direct scroll ${index}`, created_at: now - 1 })
+  store.jobs.push({ id: 'scroll-work-job', lifecycle: 'open', title: 'Scroll work fixture', description: 'Selected-work scroll preservation fixture.', category: 'plumber', location: 'Melbourne', owner_id: users.customer.id, created_at: now, updated_at: now })
+  store.quotes.push({ id: 'scroll-work-quote', target_type: 'job', target_id: 'scroll-work-job', status: 'accepted', scope: 'Scroll fixture', amount: 100, currency: 'AUD', timing: 'Tomorrow', valid_until: null, notes: '', revision: 1, created_at: now, updated_at: now, accepted_at: now, tradie_id: users.tradie.id })
+  for (let index = 0; index < 201; index++) store.messages.push({ id: `scroll-work-${String(index).padStart(3, '0')}`, target_type: 'job', target_id: 'scroll-work-job', sender_id: users.customer.id, sender_name: users.customer.name, recipient_id: users.tradie.id, body: `Work scroll ${index}`, created_at: now - 1 })
+
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.clock.install()
+
+  const assertScrollLifecycle = async (route: string, messagePrefix: 'Direct scroll' | 'Work scroll', append: (body: string) => void) => {
+    await customer.page.goto(route)
+    await expect(customer.page.getByText(`${messagePrefix} 101`)).toBeVisible()
+    const box = customer.page.getByText(`${messagePrefix} 101`).locator('..').locator('..')
+    const readingState = () => box.evaluate((node, prefix) => {
+      node.scrollTop = Math.floor((node.scrollHeight - node.clientHeight) / 2)
+      const boxRect = node.getBoundingClientRect()
+      const anchor = [...node.querySelectorAll<HTMLElement>(':scope > div')].find((row) => row.getBoundingClientRect().bottom > boxRect.top && row.textContent?.includes(prefix))
+      return { top: node.scrollTop, anchor: anchor?.textContent?.split('\n')[0] ?? '' }
+    }, messagePrefix)
+
+    const beforePolling = await readingState()
+    const incoming = `${messagePrefix} incoming while reading`
+    append(incoming)
+    await customer.page.clock.fastForward(15_000)
+    await expect(customer.page.getByText(incoming)).toBeAttached()
+    expect(await box.evaluate((node) => node.scrollTop)).toBe(beforePolling.top)
+    expect(await box.evaluate((node, prefix) => {
+      const boxRect = node.getBoundingClientRect()
+      return [...node.querySelectorAll<HTMLElement>(':scope > div')].find((row) => row.getBoundingClientRect().bottom > boxRect.top && row.textContent?.includes(prefix))?.textContent?.split('\n')[0] ?? ''
+    }, messagePrefix)).toBe(beforePolling.anchor)
+
+    await customer.page.getByRole('button', { name: 'Load older messages' }).evaluate((button: HTMLButtonElement) => button.click())
+    // The polling row makes the cursor start at 101, so the first older
+    // 100-row page reaches 1; a second click would fetch the final row 0.
+    await expect(customer.page.getByText(`${messagePrefix} 1`, { exact: true })).toBeAttached()
+    expect(await box.evaluate((node, prefix) => {
+      const boxRect = node.getBoundingClientRect()
+      return [...node.querySelectorAll<HTMLElement>(':scope > div')].find((row) => row.getBoundingClientRect().bottom > boxRect.top && row.textContent?.includes(prefix))?.textContent?.split('\n')[0] ?? ''
+    }, messagePrefix)).toBe(beforePolling.anchor)
+
+    await box.evaluate((node) => { node.scrollTop = node.scrollHeight })
+    const latest = `${messagePrefix} incoming at bottom`
+    append(latest)
+    await customer.page.clock.fastForward(15_000)
+    await expect(customer.page.getByText(latest)).toBeAttached()
+    expect(await box.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight)).toBeLessThanOrEqual(1)
+  }
+
+  await assertScrollLifecycle(`/#/messages/${store.listing.id}/${users.tradie.id}`, 'Direct scroll', (body) => store.directMessages.push({ id: `scroll-direct-incoming-${store.directMessages.length}`, listing_id: store.listing.id, sender_id: users.tradie.id, sender_name: users.tradie.name, recipient_id: users.customer.id, body, created_at: now + store.directMessages.length }))
+  await assertScrollLifecycle('/#/work/job/scroll-work-job/tradie-1', 'Work scroll', (body) => store.messages.push({ id: `scroll-work-incoming-${store.messages.length}`, target_type: 'job', target_id: 'scroll-work-job', sender_id: users.tradie.id, sender_name: users.tradie.name, recipient_id: users.customer.id, body, created_at: now + store.messages.length }))
+  await customer.context.close()
+})
+
 test('customer cannot accept an unseen revised quote and is shown its latest terms', async ({ browser }) => {
   const store = seed()
   store.jobs.push({ id: 'revision-job', lifecycle: 'open', title: 'Revision guard repair', description: 'A quote must be reviewed at its current revision.', category: 'plumber', location: 'Melbourne', owner_id: users.customer.id, created_at: now, updated_at: now })
