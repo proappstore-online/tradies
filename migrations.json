@@ -23,6 +23,10 @@
     {
       "name": "0006_safety",
       "sql": "CREATE TABLE IF NOT EXISTS blocks (blocker_id TEXT NOT NULL, blocked_id TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (blocker_id, blocked_id)); CREATE INDEX IF NOT EXISTS idx_blocks_blocked ON blocks (blocked_id); CREATE TABLE IF NOT EXISTS reports (id TEXT PRIMARY KEY, reporter_id TEXT NOT NULL, reported_id TEXT NOT NULL, listing_id TEXT, reason TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS idx_reports_reported ON reports (reported_id, created_at DESC)"
+    },
+    {
+      "name": "0007_tradies_roles_and_jobs",
+      "sql": "CREATE TABLE IF NOT EXISTS profiles (user_id TEXT PRIMARY KEY, role TEXT NOT NULL CHECK (role IN ('customer', 'tradie')), trade_category TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS idx_profiles_role_category ON profiles (role, trade_category); CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')), title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS idx_jobs_public ON jobs (status, created_at DESC); CREATE INDEX IF NOT EXISTS idx_jobs_customer ON jobs (customer_id, created_at DESC)"
     }
   ]
 }

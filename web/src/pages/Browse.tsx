@@ -28,16 +28,20 @@ export function Browse() {
   const [rows, setRows] = useState<Listing[]>([])
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(true)
+  const [error, setError] = useState('')
   const { saved, toggle, signedIn } = useSaved()
 
   const load = useCallback(async (before?: number) => {
     setBusy(true)
+    setError('')
     try {
       const page = query.trim()
         ? await pub<Listing>('search_listings', { q: query.trim() })
         : await pub<Listing>('list_listings', { category: category || null, before: before ?? null })
       setRows((prev) => (before ? [...prev, ...page] : page))
       setDone(!!query.trim() || page.length < 24)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not load the directory.')
     } finally {
       setBusy(false)
     }
@@ -46,7 +50,8 @@ export function Browse() {
   useEffect(() => { load() }, [load])
 
   return (
-    <Section title="Browse">
+    <Section title="Directory">
+      <p className="mb-4 max-w-2xl text-sm text-[var(--muted)]">Find local tradies by trade and service area. Contact details stay private until you start an enquiry.</p>
       <form className="mb-4 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); load() }} role="search">
         <div className="min-w-48 flex-1"><Input aria-label="Search" placeholder="Search title, description or location" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
         <select aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)} className="rounded-[var(--radius-sm)] border border-[var(--line-strong)] bg-[var(--panel-strong)] px-3 py-2 text-sm text-[var(--ink)]">
@@ -55,7 +60,8 @@ export function Browse() {
         </select>
         <Button type="submit" variant="secondary">Search</Button>
       </form>
-      {rows.length === 0 && !busy ? <Empty title="No listings yet" description="Be the first: sign in and publish one." /> : null}
+      {error ? <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--danger)] p-3 text-sm text-[var(--danger)]"><span>{error}</span><Button variant="ghost" size="sm" onClick={() => load()}>Try again</Button></div> : null}
+      {rows.length === 0 && !busy && !error ? <Empty title="No tradies listed yet" description="Tradies can sign in and add a service profile." /> : null}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {rows.map((l) => <ListingCard key={l.id} listing={l} saved={saved.has(l.id)} onToggleSave={signedIn ? () => toggle(l.id) : undefined} />)}
       </div>

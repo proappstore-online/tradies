@@ -5,10 +5,13 @@ import { Empty, Section } from '../components'
 
 export function Conversations() {
   const [rows, setRows] = useState<Conversation[] | null>(null)
-  useEffect(() => { q<Conversation>('list_conversations').then(setRows) }, [])
+  const [error, setError] = useState('')
+  const load = () => q<Conversation>('list_conversations').then(setRows).catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load your inbox.'))
+  useEffect(() => { load() }, [])
   return (
-    <Section title="Messages">
-      {rows && rows.length === 0 ? <Empty title="No conversations" description="Message an owner from a listing, or reply to a request from your inbox." /> : null}
+    <Section title="Inbox">
+      {error ? <p role="alert" className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
+      {rows && rows.length === 0 ? <Empty title="No conversations" description="Send an enquiry from a tradie profile, or reply privately to an enquiry." /> : null}
       <ul className="space-y-2">
         {(rows ?? []).map((c) => (
           <li key={`${c.listing_id}:${c.other_id}`}>

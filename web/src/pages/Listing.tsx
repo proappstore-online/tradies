@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, Modal } from '@proappstore/sdk/ui'
-import { app, pub, q, x, images, imageUrl, money, when, MAPS_ENABLED, REQUEST, type Listing, type Review } from '../api'
+import { app, pub, q, x, images, imageUrl, when, MAPS_ENABLED, REQUEST, type Listing, type Review } from '../api'
 import { Empty, Field, Section, Stars, TextArea } from '../components'
 import { useSaved } from './Browse'
 
@@ -31,8 +31,8 @@ export function ListingPage({ id }: { id: string }) {
   }
   useEffect(() => { refresh() }, [id])
 
-  if (listing === undefined) return <Section title="Listing"><p className="text-sm text-[var(--muted)]">Loading…</p></Section>
-  if (listing === null) return <Section title="Listing"><Empty title="This listing is not available" description="It may have been paused or archived by its owner." /></Section>
+  if (listing === undefined) return <Section title="Tradie"><p className="text-sm text-[var(--muted)]">Loading…</p></Section>
+  if (listing === null) return <Section title="Tradie"><Empty title="This tradie profile is not available" description="It may have been paused or archived by its owner." /></Section>
 
   const mine = user?.id === listing.owner_id
   const photos = images(listing)
@@ -64,8 +64,7 @@ export function ListingPage({ id }: { id: string }) {
           {photos.map((k) => <img key={k} src={imageUrl(k)} alt="" className="aspect-[4/3] w-full rounded-[var(--radius-sm)] object-cover" />)}
         </div>
       ) : null}
-      <p className="text-sm text-[var(--muted)]">{[listing.category, listing.location].filter(Boolean).join(' · ')} · by {listing.owner_name || 'the owner'} · listed {when(listing.created_at)}</p>
-      <p className="mt-1 text-lg font-semibold text-[var(--ink)]">{money(listing)}</p>
+      <p className="text-sm text-[var(--muted)]">{[listing.category, listing.location].filter(Boolean).join(' · ')} · {listing.owner_name || 'Tradie'} · listed {when(listing.created_at)}</p>
       {stats.review_count ? <p className="mt-1 text-sm"><Stars rating={stats.avg_rating ?? 0} /> <span className="text-[var(--muted)]">{stats.review_count} review{stats.review_count === 1 ? '' : 's'}</span></p> : null}
       <p className="mt-4 whitespace-pre-wrap text-sm text-[var(--ink)]">{listing.description}</p>
       {MAPS_ENABLED && listing.lat !== null && listing.lng !== null ? (
@@ -73,12 +72,12 @@ export function ListingPage({ id }: { id: string }) {
       ) : null}
 
       <div className="mt-6 flex flex-wrap gap-2">
-        {mine ? <Button variant="secondary" onClick={() => { location.hash = `#/mine/${id}/edit` }}>Edit listing</Button> : null}
+        {mine ? <Button variant="secondary" onClick={() => { location.hash = `#/mine/${id}/edit` }}>Edit service</Button> : null}
         {!mine && signedIn ? <Button onClick={() => setAsking(true)}>{REQUEST.verb}</Button> : null}
-        {!mine && signedIn ? <Button variant="secondary" onClick={() => { location.hash = `#/messages/${id}/${listing.owner_id}` }}>Message owner</Button> : null}
+        {!mine && signedIn ? <Button variant="secondary" onClick={() => { location.hash = `#/messages/${id}/${listing.owner_id}` }}>Message tradie</Button> : null}
         {!mine && !signedIn ? <Button onClick={() => app.auth.signIn()}>Sign in to {REQUEST.noun}</Button> : null}
         {reviewable.length ? <Button variant="secondary" onClick={() => setReviewing(true)}>Leave a review</Button> : null}
-        {!mine && signedIn ? <a href="#/settings" className="self-center text-xs text-[var(--muted)] underline-offset-4 hover:underline">Block or report this owner</a> : null}
+        {!mine && signedIn ? <a href="#/settings" className="self-center text-xs text-[var(--muted)] underline-offset-4 hover:underline">Block or report this tradie</a> : null}
       </div>
       {flash ? <p role="status" className="mt-3 text-sm text-[var(--success)]">{flash}</p> : null}
 
@@ -94,7 +93,7 @@ export function ListingPage({ id }: { id: string }) {
       </ul>
 
       <Modal open={asking} onClose={() => setAsking(false)} title={`${REQUEST.verb}: ${listing.title}`}>
-        <Field label="Note to the owner"><TextArea aria-label="Note to the owner" rows={4} placeholder="Dates, questions, anything they should know" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        <Field label="Private note to the tradie"><TextArea aria-label="Note to the tradie" rows={4} placeholder="Describe the work or ask a question. Share precise address details only privately." value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         <div className="mt-4 flex justify-end gap-2"><Button variant="ghost" onClick={() => setAsking(false)}>Cancel</Button><Button onClick={sendRequest}>Send</Button></div>
       </Modal>
       <Modal open={reviewing} onClose={() => setReviewing(false)} title="Your review">

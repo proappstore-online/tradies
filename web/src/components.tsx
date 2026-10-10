@@ -1,6 +1,6 @@
 import type { ReactNode, TextareaHTMLAttributes } from 'react'
 import { Card } from '@proappstore/sdk/ui'
-import { images, imageUrl, money, type Listing } from './api'
+import { images, imageUrl, type Listing } from './api'
 
 export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -44,8 +44,8 @@ export function Stars({ rating }: { rating: number }) {
 
 export function Status({ value }: { value: string }) {
   const tone: Record<string, string> = {
-    active: 'var(--success)', accepted: 'var(--success)', completed: 'var(--sky)',
-    pending: 'var(--warning)', paused: 'var(--muted)', declined: 'var(--danger)', cancelled: 'var(--muted)', archived: 'var(--muted)',
+    active: 'var(--success)', open: 'var(--success)', accepted: 'var(--success)', completed: 'var(--sky)',
+    pending: 'var(--warning)', paused: 'var(--muted)', closed: 'var(--muted)', declined: 'var(--danger)', cancelled: 'var(--muted)', archived: 'var(--muted)',
   }
   return (
     <span className="rounded-full border px-2 py-0.5 text-xs font-semibold" style={{ color: tone[value] ?? 'var(--muted)', borderColor: 'var(--line)' }}>
@@ -79,7 +79,7 @@ export function ListingCard({ listing, saved, onToggleSave }: { listing: Listing
             ) : null}
           </div>
           <p className="mt-1 text-sm text-[var(--muted)]">{[listing.category, listing.location].filter(Boolean).join(' · ')}</p>
-          <p className="mt-2 text-sm font-semibold text-[var(--ink)]">{money(listing)}</p>
+          {listing.description ? <p className="mt-2 line-clamp-2 text-sm text-[var(--muted)]">{listing.description}</p> : null}
         </div>
       </a>
     </Card>

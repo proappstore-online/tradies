@@ -3,19 +3,24 @@ import { Button } from '@proappstore/sdk/ui'
 import { q, x, when, REQUEST, type Request } from '../api'
 import { Empty, Section, Status } from '../components'
 
-export function MyRequests() {
+export function MyRequests({ title = 'My enquiries' }: { title?: string }) {
   const [rows, setRows] = useState<Request[] | null>(null)
-  const load = () => q<Request>('list_my_requests').then(setRows)
+  const [error, setError] = useState('')
+  const load = async () => {
+    try { setError(''); setRows(await q<Request>('list_my_requests')) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load your enquiries.') }
+  }
   useEffect(() => { load() }, [])
 
   async function cancel(r: Request) {
-    await x('cancel_request', { id: r.id })
+    await x('cancel_request', { id: r.id, from: r.status })
     await load()
   }
 
   return (
-    <Section title={`My ${REQUEST.plural}`}>
-      {rows && rows.length === 0 ? <Empty title={`No ${REQUEST.plural} yet`} description={`Find a listing and press ${REQUEST.verb}.`} /> : null}
+    <Section title={title}>
+      {error ? <p role="alert" className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
+      {rows && rows.length === 0 ? <Empty title={`No ${REQUEST.plural} yet`} description={`Find a tradie in the directory and press ${REQUEST.verb}.`} /> : null}
       <ul className="space-y-3">
         {(rows ?? []).map((r) => (
           <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--line)] p-3">
@@ -37,7 +42,11 @@ export function MyRequests() {
 
 export function Inbox() {
   const [rows, setRows] = useState<Request[] | null>(null)
-  const load = () => q<Request>('list_incoming_requests').then(setRows)
+  const [error, setError] = useState('')
+  const load = async () => {
+    try { setError(''); setRows(await q<Request>('list_incoming_requests')) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load incoming enquiries.') }
+  }
   useEffect(() => { load() }, [])
 
   async function move(r: Request, to: string) {
@@ -49,7 +58,8 @@ export function Inbox() {
 
   return (
     <Section title="Inbox">
-      {rows && rows.length === 0 ? <Empty title="No incoming requests" description="Requests on your listings show up here." /> : null}
+      {error ? <p role="alert" className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
+      {rows && rows.length === 0 ? <Empty title="No incoming enquiries" description="Private enquiries on your services show up here." /> : null}
       <ul className="space-y-3">
         {(rows ?? []).map((r) => (
           <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--line)] p-3">

@@ -8,13 +8,14 @@ export const app = initPro({ appId: 'tradies', authMode: 'platform-cookie' })
  * Extension points. The archetype is "owners publish listings, seekers request them";
  * the noun each side uses is yours to pick (booking, application, enquiry, match…).
  */
-export const REQUEST = { noun: 'request', plural: 'requests', verb: 'Request' } as const
-export const CATEGORIES = ['room', 'job', 'service', 'vehicle', 'other'] as const
-/** Optional map capability: geocode a listing's location on save and show it on the detail page. */
+export const REQUEST = { noun: 'enquiry', plural: 'enquiries', verb: 'Send enquiry' } as const
+export const CATEGORIES = ['plumber', 'electrician', 'carpenter', 'painter', 'landscaper', 'builder', 'cleaner', 'other'] as const
+/** Service areas are deliberately free-text only; exact customer addresses are never public. */
 export const MAPS_ENABLED = false
 
 export type ListingStatus = 'active' | 'paused' | 'archived'
 export type RequestStatus = 'pending' | 'accepted' | 'declined' | 'completed' | 'cancelled'
+export type Role = 'customer' | 'tradie'
 
 export interface Listing {
   id: string
@@ -27,10 +28,25 @@ export interface Listing {
   location: string
   lat: number | null
   lng: number | null
-  price: number | null
-  price_unit: string
   /** JSON array of public storage keys (see uploadPhoto). */
   images: string
+  created_at: number
+  updated_at: number
+}
+
+export interface Profile {
+  user_id: string
+  role: Role
+  trade_category: string
+}
+
+export interface Job {
+  id: string
+  status: 'open' | 'closed'
+  title: string
+  description: string
+  category: string
+  location: string
   created_at: number
   updated_at: number
 }
@@ -112,12 +128,6 @@ export async function uploadPhoto(file: File): Promise<string> {
   const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
   const res = await app.storage.uploadUserPublic(`${crypto.randomUUID()}-${safe}`, file, file.type)
   return res.key
-}
-
-export function money(l: Pick<Listing, 'price' | 'price_unit'>): string {
-  if (l.price === null || l.price === undefined) return ''
-  const amount = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(l.price)
-  return l.price_unit ? `${amount} / ${l.price_unit}` : amount
 }
 
 export function when(ts: number): string {

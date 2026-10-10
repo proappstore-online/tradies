@@ -2,9 +2,9 @@
   "tools": [
     {
       "name": "list_listings",
-      "description": "Public catalogue page, newest first. Only active listings; keyset pagination \u2014 pass the last row's created_at as `before` for the next page. No personal data beyond the owner's chosen display name.",
+      "description": "Public Tradies directory, newest first. Only active tradie profiles; keyset pagination \u2014 pass the last row's created_at as `before` for the next page. No personal data beyond the tradie's chosen display name and public service area.",
       "operation": "query",
-      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, price, price_unit, images, created_at, updated_at FROM listings WHERE status = 'active' AND (:category IS NULL OR category = :category) AND (:before IS NULL OR created_at < :before) ORDER BY created_at DESC LIMIT 24",
+      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at FROM listings WHERE status = 'active' AND (:category IS NULL OR category = :category) AND (:before IS NULL OR created_at < :before) ORDER BY created_at DESC LIMIT 24",
       "params": {
         "category": {
           "type": "string",
@@ -21,9 +21,9 @@
     },
     {
       "name": "search_listings",
-      "description": "Public search over active listings by title, description or location (substring match, case-insensitive). Same columns as list_listings.",
+      "description": "Public search over active tradie profiles by title, description or service area (substring match, case-insensitive). Same privacy-safe columns as list_listings.",
       "operation": "query",
-      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, price, price_unit, images, created_at, updated_at FROM listings WHERE status = 'active' AND (title LIKE '%' || :q || '%' OR description LIKE '%' || :q || '%' OR location LIKE '%' || :q || '%') ORDER BY created_at DESC LIMIT 50",
+      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at FROM listings WHERE status = 'active' AND (title LIKE '%' || :q || '%' OR description LIKE '%' || :q || '%' OR location LIKE '%' || :q || '%') ORDER BY created_at DESC LIMIT 50",
       "params": {
         "q": {
           "type": "string",
@@ -34,9 +34,9 @@
     },
     {
       "name": "get_listing",
-      "description": "Public listing detail. Only active listings are visible to the public; an archived or paused listing returns no row.",
+      "description": "Public tradie profile detail. Only active profiles are visible to the public; an archived or paused profile returns no row.",
       "operation": "query",
-      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, price, price_unit, images, created_at, updated_at FROM listings WHERE id = :id AND status = 'active' LIMIT 1",
+      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at FROM listings WHERE id = :id AND status = 'active' LIMIT 1",
       "params": {
         "id": {
           "type": "string",
@@ -75,7 +75,7 @@
       "name": "list_my_listings",
       "description": "The caller's own listings in every status, newest first.",
       "operation": "query",
-      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, price, price_unit, images, created_at, updated_at FROM listings WHERE owner_id = :__user_id ORDER BY created_at DESC LIMIT 200",
+      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at FROM listings WHERE owner_id = :__user_id ORDER BY created_at DESC LIMIT 200",
       "params": {},
       "requires_auth": true
     },
@@ -83,7 +83,7 @@
       "name": "get_my_listing",
       "description": "One of the caller's own listings, in any status (for the edit form).",
       "operation": "query",
-      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, price, price_unit, images, created_at, updated_at FROM listings WHERE id = :id AND owner_id = :__user_id LIMIT 1",
+      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at FROM listings WHERE id = :id AND owner_id = :__user_id LIMIT 1",
       "params": {
         "id": {
           "type": "string",
@@ -94,9 +94,9 @@
     },
     {
       "name": "create_listing",
-      "description": "Publish a listing owned by the caller. Idempotent under retry: the client supplies the id and a repeat is ignored (meta.changes = 0).",
+      "description": "Publish a public tradie profile owned by the caller. Only a caller who selected the tradie role may create one. Idempotent under retry: the client supplies the id and a repeat is ignored (meta.changes = 0).",
       "operation": "execute",
-      "sql": "INSERT OR IGNORE INTO listings (id, owner_id, owner_name, status, title, description, category, location, lat, lng, price, price_unit, images, created_at, updated_at) VALUES (:id, :__user_id, :owner_name, 'active', :title, :description, :category, :location, :lat, :lng, :price, :price_unit, :images, :__now, :__now)",
+      "sql": "INSERT OR IGNORE INTO listings (id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at) SELECT :id, :__user_id, :owner_name, 'active', :title, :description, :category, :location, :lat, :lng, :images, :__now, :__now WHERE EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'tradie')",
       "params": {
         "id": {
           "type": "string",
@@ -135,16 +135,6 @@
           "description": "Longitude (optional map capability)",
           "optional": true
         },
-        "price": {
-          "type": "number",
-          "description": "Price",
-          "optional": true
-        },
-        "price_unit": {
-          "type": "string",
-          "description": "e.g. night, hour, month, fixed",
-          "default": ""
-        },
         "images": {
           "type": "string",
           "description": "JSON array of public image keys",
@@ -157,7 +147,7 @@
       "name": "update_listing",
       "description": "Edit one of the caller's own listings.",
       "operation": "execute",
-      "sql": "UPDATE listings SET title = :title, description = :description, category = :category, location = :location, lat = :lat, lng = :lng, price = :price, price_unit = :price_unit, images = :images, updated_at = :__now WHERE id = :id AND owner_id = :__user_id",
+      "sql": "UPDATE listings SET title = :title, description = :description, category = :category, location = :location, lat = :lat, lng = :lng, images = :images, updated_at = :__now WHERE id = :id AND owner_id = :__user_id AND EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'tradie')",
       "params": {
         "id": {
           "type": "string",
@@ -192,16 +182,6 @@
           "description": "Longitude",
           "optional": true
         },
-        "price": {
-          "type": "number",
-          "description": "Price",
-          "optional": true
-        },
-        "price_unit": {
-          "type": "string",
-          "description": "Price unit",
-          "default": ""
-        },
         "images": {
           "type": "string",
           "description": "JSON array of public image keys",
@@ -212,13 +192,17 @@
     },
     {
       "name": "set_listing_status",
-      "description": "Pause, re-activate or archive one of the caller's own listings. Archiving is the soft delete: history (requests, reviews, messages) stays intact.",
+      "description": "Pause, re-activate or archive one of the caller's own tradie profiles. Archiving is the soft delete: enquiry and message history stays intact. The transition applies only from the status the client last saw.",
       "operation": "execute",
-      "sql": "UPDATE listings SET status = :status, updated_at = :__now WHERE id = :id AND owner_id = :__user_id AND :status IN ('active', 'paused', 'archived')",
+      "sql": "UPDATE listings SET status = :status, updated_at = :__now WHERE id = :id AND owner_id = :__user_id AND status = :from AND :status IN ('active', 'paused', 'archived')",
       "params": {
         "id": {
           "type": "string",
           "description": "Listing id"
+        },
+        "from": {
+          "type": "string",
+          "description": "Current status the caller last saw"
         },
         "status": {
           "type": "string",
@@ -257,7 +241,7 @@
       "name": "list_my_favorites",
       "description": "The caller's saved listings that are still active, most recently saved first.",
       "operation": "query",
-      "sql": "SELECT l.id, l.owner_id, l.owner_name, l.status, l.title, l.description, l.category, l.location, l.lat, l.lng, l.price, l.price_unit, l.images, l.created_at, l.updated_at FROM favorites f JOIN listings l ON l.id = f.listing_id WHERE f.user_id = :__user_id AND l.status = 'active' ORDER BY f.created_at DESC LIMIT 200",
+      "sql": "SELECT l.id, l.owner_id, l.owner_name, l.status, l.title, l.description, l.category, l.location, l.lat, l.lng, l.images, l.created_at, l.updated_at FROM favorites f JOIN listings l ON l.id = f.listing_id WHERE f.user_id = :__user_id AND l.status = 'active' ORDER BY f.created_at DESC LIMIT 200",
       "params": {},
       "requires_auth": true
     },
@@ -271,9 +255,9 @@
     },
     {
       "name": "create_request",
-      "description": "Ask for a listing (book / apply / enquire). Refused silently (meta.changes = 0) when: the listing is not active, the caller owns it, either side has blocked the other, or the caller already has an open request on it. Idempotent under retry by client id.",
+      "description": "Send a private enquiry to a tradie profile. Refused silently (meta.changes = 0) when: the profile is not active, roles are not customer-to-tradie, the caller owns it, either side has blocked the other, or the caller already has an open enquiry on it. Idempotent under retry by client id.",
       "operation": "execute",
-      "sql": "INSERT OR IGNORE INTO requests (id, listing_id, requester_id, requester_name, status, note, created_at, updated_at) SELECT :id, :listing_id, :__user_id, :requester_name, 'pending', :note, :__now, :__now FROM listings l WHERE l.id = :listing_id AND l.status = 'active' AND l.owner_id != :__user_id AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = l.owner_id) OR (b.blocker_id = l.owner_id AND b.blocked_id = :__user_id)) AND NOT EXISTS (SELECT 1 FROM requests r WHERE r.listing_id = :listing_id AND r.requester_id = :__user_id AND r.status IN ('pending', 'accepted'))",
+      "sql": "INSERT OR IGNORE INTO requests (id, listing_id, requester_id, requester_name, status, note, created_at, updated_at) SELECT :id, :listing_id, :__user_id, :requester_name, 'pending', :note, :__now, :__now FROM listings l WHERE l.id = :listing_id AND l.status = 'active' AND l.owner_id != :__user_id AND EXISTS (SELECT 1 FROM profiles customer WHERE customer.user_id = :__user_id AND customer.role = 'customer') AND EXISTS (SELECT 1 FROM profiles tradie WHERE tradie.user_id = l.owner_id AND tradie.role = 'tradie') AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = :__user_id AND b.blocked_id = l.owner_id) OR (b.blocker_id = l.owner_id AND b.blocked_id = :__user_id)) AND NOT EXISTS (SELECT 1 FROM requests r WHERE r.listing_id = :listing_id AND r.requester_id = :__user_id AND r.status IN ('pending', 'accepted'))",
       "params": {
         "id": {
           "type": "string",
@@ -305,13 +289,17 @@
     },
     {
       "name": "cancel_request",
-      "description": "Withdraw one of the caller's own open requests.",
+      "description": "Withdraw one of the caller's own open enquiries using the status the caller last saw.",
       "operation": "execute",
-      "sql": "UPDATE requests SET status = 'cancelled', updated_at = :__now WHERE id = :id AND requester_id = :__user_id AND status IN ('pending', 'accepted')",
+      "sql": "UPDATE requests SET status = 'cancelled', updated_at = :__now WHERE id = :id AND requester_id = :__user_id AND status = :from AND :from IN ('pending', 'accepted')",
       "params": {
         "id": {
           "type": "string",
           "description": "Request id"
+        },
+        "from": {
+          "type": "string",
+          "description": "Current status the caller last saw"
         }
       },
       "requires_auth": true
@@ -467,6 +455,106 @@
       "operation": "query",
       "sql": "SELECT blocked_id, created_at FROM blocks WHERE blocker_id = :__user_id ORDER BY created_at DESC LIMIT 500",
       "params": {},
+      "requires_auth": true
+    },
+    {
+      "name": "get_my_profile",
+      "description": "The caller's immutable Tradies role and, for a tradie, their selected trade category.",
+      "operation": "query",
+      "sql": "SELECT user_id, role, trade_category FROM profiles WHERE user_id = :__user_id LIMIT 1",
+      "params": {},
+      "requires_auth": true
+    },
+    {
+      "name": "create_profile",
+      "description": "Choose the caller's Tradies role once. A repeat is ignored, so setup retries are idempotent. Tradies must select a trade category.",
+      "operation": "execute",
+      "sql": "INSERT OR IGNORE INTO profiles (user_id, role, trade_category, created_at, updated_at) SELECT :__user_id, :role, CASE WHEN :role = 'tradie' THEN :trade_category ELSE '' END, :__now, :__now WHERE :role IN ('customer', 'tradie') AND (:role = 'customer' OR length(trim(:trade_category)) > 0)",
+      "params": {
+        "role": {
+          "type": "string",
+          "description": "customer | tradie"
+        },
+        "trade_category": {
+          "type": "string",
+          "description": "Primary trade for a tradie; blank for a customer",
+          "default": ""
+        }
+      },
+      "requires_auth": true
+    },
+    {
+      "name": "list_jobs",
+      "description": "Public job board, newest open jobs first. Contains only job details and broad location; it never returns customer id, name, address, contact details or private enquiry data.",
+      "operation": "query",
+      "sql": "SELECT id, status, title, description, category, location, created_at, updated_at FROM jobs WHERE status = 'open' AND (:category IS NULL OR category = :category) ORDER BY created_at DESC LIMIT 50",
+      "params": {
+        "category": {
+          "type": "string",
+          "description": "Filter by trade category",
+          "optional": true
+        }
+      },
+      "requires_auth": false
+    },
+    {
+      "name": "list_my_jobs",
+      "description": "The caller's own jobs in every status, newest first.",
+      "operation": "query",
+      "sql": "SELECT id, status, title, description, category, location, created_at, updated_at FROM jobs WHERE customer_id = :__user_id ORDER BY created_at DESC LIMIT 200",
+      "params": {},
+      "requires_auth": true
+    },
+    {
+      "name": "create_job",
+      "description": "Post a public job as a customer. The client supplies the id and retries are ignored. Exact addresses and contact details are intentionally not collected here.",
+      "operation": "execute",
+      "sql": "INSERT OR IGNORE INTO jobs (id, customer_id, status, title, description, category, location, created_at, updated_at) SELECT :id, :__user_id, 'open', :title, :description, :category, :location, :__now, :__now WHERE EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = :__user_id AND p.role = 'customer')",
+      "params": {
+        "id": {
+          "type": "string",
+          "description": "Client-generated job id"
+        },
+        "title": {
+          "type": "string",
+          "description": "Public job title"
+        },
+        "description": {
+          "type": "string",
+          "description": "Public job description without contact details",
+          "default": ""
+        },
+        "category": {
+          "type": "string",
+          "description": "Trade category"
+        },
+        "location": {
+          "type": "string",
+          "description": "Broad service area only",
+          "default": ""
+        }
+      },
+      "requires_auth": true
+    },
+    {
+      "name": "set_job_status",
+      "description": "Close or re-open one of the caller's own jobs using the status the caller last saw.",
+      "operation": "execute",
+      "sql": "UPDATE jobs SET status = :to, updated_at = :__now WHERE id = :id AND customer_id = :__user_id AND status = :from AND ((:from = 'open' AND :to = 'closed') OR (:from = 'closed' AND :to = 'open'))",
+      "params": {
+        "id": {
+          "type": "string",
+          "description": "Job id"
+        },
+        "from": {
+          "type": "string",
+          "description": "Current status the caller last saw"
+        },
+        "to": {
+          "type": "string",
+          "description": "open | closed"
+        }
+      },
       "requires_auth": true
     },
     {

@@ -72,30 +72,54 @@ for (const t of Object.values(TOOLS).filter((t) => t.requires_auth === false)) {
   ok(!/SELECT\s+\*/i.test(t.sql) && /\bLIMIT\s+\d+\b/i.test(t.sql), `${t.name}: public, column-explicit, literal LIMIT`)
 }
 
+// Every scoped action rejects the public call path before it can resolve user input.
+for (const t of Object.values(TOOLS).filter((t) => t.requires_auth !== false)) {
+  let denied = false
+  try { call(t.name, null) } catch { denied = true }
+  ok(denied, `${t.name}: requires an authenticated caller`)
+}
+
+// --- Roles and public jobs ------------------------------------------------------------------
+ok(call('create_profile', OWNER, { role: 'tradie', trade_category: 'plumber' }) === 1, 'owner chooses the tradie role')
+ok(call('create_profile', OWNER, { role: 'customer' }) === 0, 'role selection is immutable and idempotent')
+ok(call('create_profile', SEEKER, { role: 'customer' }) === 1, 'seeker chooses the customer role')
+ok(call('create_profile', STRANGER, { role: 'customer' }) === 1, 'stranger chooses the customer role')
+ok(call('create_profile', 'gh:invalid', { role: 'tradie' }) === 0, 'a tradie cannot omit a trade category')
+ok(call('get_my_profile', STRANGER)[0]?.role === 'customer' && call('get_my_profile', STRANGER)[0]?.user_id === STRANGER, 'a caller only reads their own role')
+ok(call('create_job', OWNER, { id: 'job-owner', title: 'Nope', category: 'plumber' }) === 0, 'a tradie cannot post a customer job')
+ok(call('create_listing', SEEKER, { id: 'customer-service', owner_name: 'Sam', title: 'Not a tradie', category: 'plumber' }) === 0, 'a customer cannot publish a tradie service')
+ok(call('create_job', SEEKER, { id: 'job-1', title: 'Fix tap', description: 'Kitchen tap', category: 'plumber', location: 'Northside' }) === 1, 'customer posts a public job')
+ok(call('create_job', SEEKER, { id: 'job-1', title: 'Retry', category: 'plumber' }) === 0, 'create_job is idempotent by client id')
+ok(!('customer_id' in (call('list_jobs', null)[0] ?? {})), 'public jobs never expose the customer id or contact data')
+ok(call('list_my_jobs', STRANGER).length === 0, 'a stranger sees none of another customer’s jobs')
+ok(call('set_job_status', STRANGER, { id: 'job-1', from: 'open', to: 'closed' }) === 0, 'a stranger cannot close a customer job')
+ok(call('set_job_status', SEEKER, { id: 'job-1', from: 'closed', to: 'open' }) === 0, 'a stale job status changes nothing')
+
 // --- Listings -------------------------------------------------------------------------------
-ok(call('create_listing', OWNER, { id: L, owner_name: 'Olive', title: 'Sunny room', category: 'room', price: 40, price_unit: 'night' }) === 1, 'owner publishes a listing')
+ok(call('create_listing', OWNER, { id: L, owner_name: 'Olive', title: 'Olive Plumbing', category: 'plumber' }) === 1, 'tradie publishes a service')
 ok(call('create_listing', OWNER, { id: L, owner_name: 'Olive', title: 'Sunny room again' }) === 0, 'create_listing is idempotent by client id')
 ok(call('update_listing', STRANGER, { id: L, title: 'Hijacked' }) === 0, 'a stranger cannot edit it')
-ok(call('set_listing_status', STRANGER, { id: L, status: 'archived' }) === 0, 'a stranger cannot archive it')
+ok(call('set_listing_status', STRANGER, { id: L, from: 'active', status: 'archived' }) === 0, 'a stranger cannot archive it')
 ok(call('get_my_listing', STRANGER, { id: L }).length === 0, 'a stranger cannot load it for editing')
 ok(call('get_listing', null, { id: L }).length === 1, 'the public sees an active listing')
-ok(call('set_listing_status', OWNER, { id: L, status: 'paused' }) === 1, 'owner pauses')
+ok(call('set_listing_status', OWNER, { id: L, from: 'active', status: 'paused' }) === 1, 'owner pauses')
 ok(call('get_listing', null, { id: L }).length === 0 && call('list_listings', null).length === 0, 'the public no longer sees a paused listing')
-ok(call('set_listing_status', OWNER, { id: L, status: 'deleted' }) === 0, 'unknown status is refused')
-call('set_listing_status', OWNER, { id: L, status: 'active' })
-ok(call('search_listings', null, { q: 'SUNNY' }).length === 1, 'public search is case-insensitive')
+ok(call('set_listing_status', OWNER, { id: L, from: 'paused', status: 'deleted' }) === 0, 'unknown status is refused')
+ok(call('set_listing_status', OWNER, { id: L, from: 'active', status: 'archived' }) === 0, 'a stale service status changes nothing')
+call('set_listing_status', OWNER, { id: L, from: 'paused', status: 'active' })
+ok(call('search_listings', null, { q: 'OLIVE' }).length === 1, 'public search is case-insensitive')
 
 // --- Requests -------------------------------------------------------------------------------
-ok(call('create_request', OWNER, { id: 'r-own', listing_id: L, requester_name: 'Olive' }) === 0, 'owner cannot request their own listing')
-ok(call('create_request', SEEKER, { id: 'r-1', listing_id: L, requester_name: 'Sam', note: 'Two nights?' }) === 1, 'seeker requests')
+ok(call('create_request', OWNER, { id: 'r-own', listing_id: L, requester_name: 'Olive' }) === 0, 'tradie cannot enquire on their own service')
+ok(call('create_request', SEEKER, { id: 'r-1', listing_id: L, requester_name: 'Sam', note: 'Can you help?' }) === 1, 'customer sends a private enquiry')
 ok(call('create_request', SEEKER, { id: 'r-1', listing_id: L, requester_name: 'Sam' }) === 0, 'create_request is idempotent by client id')
-ok(call('create_request', SEEKER, { id: 'r-2', listing_id: L, requester_name: 'Sam' }) === 0, 'one open request per listing per seeker')
+ok(call('create_request', SEEKER, { id: 'r-2', listing_id: L, requester_name: 'Sam' }) === 0, 'one open enquiry per service per customer')
 ok(call('set_request_status', SEEKER, { id: 'r-1', from: 'pending', to: 'accepted' }) === 0, 'the requester cannot accept their own request')
 ok(call('set_request_status', STRANGER, { id: 'r-1', from: 'pending', to: 'accepted' }) === 0, 'a stranger cannot transition it')
 ok(call('set_request_status', OWNER, { id: 'r-1', from: 'pending', to: 'completed' }) === 0, 'pending cannot jump to completed')
 ok(call('set_request_status', OWNER, { id: 'r-1', from: 'pending', to: 'accepted' }) === 1, 'owner accepts')
 ok(call('set_request_status', OWNER, { id: 'r-1', from: 'pending', to: 'accepted' }) === 0, 'a stale client changes nothing')
-ok(call('cancel_request', STRANGER, { id: 'r-1' }) === 0, 'a stranger cannot cancel it')
+ok(call('cancel_request', STRANGER, { id: 'r-1', from: 'accepted' }) === 0, 'a stranger cannot cancel it')
 ok(call('list_incoming_requests', STRANGER).length === 0 && call('list_my_requests', STRANGER).length === 0, 'a stranger sees no requests')
 ok(call('set_request_status', OWNER, { id: 'r-1', from: 'accepted', to: 'completed' }) === 1, 'owner completes')
 

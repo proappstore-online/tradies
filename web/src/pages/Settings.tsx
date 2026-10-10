@@ -5,8 +5,8 @@ import { Field, Section, TextArea } from '../components'
 
 /**
  * Safety controls. Ids are platform user ids as they appear in threads and requests
- * (paste from a conversation URL). No profile table: the platform account is the profile
- * and this app stores nothing about a person beyond what they publish (PAS-OPS-016).
+ * (paste from a conversation URL). The role profile stores only a selected role and trade;
+ * contact details remain platform-private and are never exposed in public actions.
  */
 export function Settings() {
   const [blocks, setBlocks] = useState<{ blocked_id: string; created_at: number }[]>([])
@@ -34,7 +34,7 @@ export function Settings() {
 
   return (
     <Section title="Settings">
-      <p className="text-sm text-[var(--muted)]">Signed in as <strong className="text-[var(--ink)]">{app.auth.user?.name}</strong>. Your listings, requests and messages are the only data this app keeps about you; archive listings to take them off the catalogue.</p>
+      <p className="text-sm text-[var(--muted)]">Signed in as <strong className="text-[var(--ink)]">{app.auth.user?.name}</strong>. Your role, services, jobs and private enquiries are scoped to your account. Archive services to remove them from the directory.</p>
 
       <h2 className="display-font mt-8 text-xl font-semibold text-[var(--ink)]">Block or report</h2>
       <form className="mt-3 max-w-xl space-y-3" onSubmit={block}>

@@ -35,9 +35,9 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'tradies — ProAppStore',
-        short_name: 'tradies',
-        description: 'tradies on ProAppStore',
+        name: 'Tradies — ProAppStore',
+        short_name: 'Tradies',
+        description: 'Find local tradies, post jobs and keep enquiries private.',
         start_url: '/',
         scope: '/',
         display: 'standalone',

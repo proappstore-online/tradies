@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Button, Input } from '@proappstore/sdk/ui'
-import { app, q, x, images, imageUrl, uploadPhoto, money, CATEGORIES, MAPS_ENABLED, type Listing } from '../api'
+import { app, q, x, images, imageUrl, uploadPhoto, CATEGORIES, MAPS_ENABLED, type Listing } from '../api'
 import { Empty, Field, Section, Status, TextArea } from '../components'
 
 export function OwnerDashboard() {
@@ -9,19 +9,19 @@ export function OwnerDashboard() {
   useEffect(() => { load() }, [])
 
   async function setStatus(l: Listing, status: string) {
-    await x('set_listing_status', { id: l.id, status })
+    await x('set_listing_status', { id: l.id, from: l.status, status })
     await load()
   }
 
   return (
-    <Section title="My listings" action={<Button onClick={() => { location.hash = '#/mine/new' }}>New listing</Button>}>
-      {rows && rows.length === 0 ? <Empty title="You have no listings" description="Publish one and it appears in the public catalogue immediately." /> : null}
+    <Section title="My trade profile" action={<Button onClick={() => { location.hash = '#/mine/new' }}>Add service</Button>}>
+      {rows && rows.length === 0 ? <Empty title="No services listed" description="Add the trade services you want customers to find in the directory." /> : null}
       <ul className="space-y-3">
         {(rows ?? []).map((l) => (
           <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--line)] p-3">
             <div>
               <a href={`#/l/${l.id}`} className="font-semibold text-[var(--ink)] hover:underline">{l.title}</a>
-              <p className="text-xs text-[var(--muted)]">{[l.category, l.location, money(l)].filter(Boolean).join(' · ')}</p>
+              <p className="text-xs text-[var(--muted)]">{[l.category, l.location].filter(Boolean).join(' · ')}</p>
             </div>
             <div className="flex items-center gap-2">
               <Status value={l.status} />
@@ -37,8 +37,8 @@ export function OwnerDashboard() {
   )
 }
 
-type Draft = { title: string; description: string; category: string; location: string; price: string; price_unit: string; images: string[] }
-const EMPTY: Draft = { title: '', description: '', category: CATEGORIES[0], location: '', price: '', price_unit: '', images: [] }
+type Draft = { title: string; description: string; category: string; location: string; images: string[] }
+const EMPTY: Draft = { title: '', description: '', category: CATEGORIES[0], location: '', images: [] }
 
 export function ListingForm({ id }: { id?: string }) {
   const [draft, setDraft] = useState<Draft>(EMPTY)
@@ -50,7 +50,7 @@ export function ListingForm({ id }: { id?: string }) {
     if (!id) return
     q<Listing>('get_my_listing', { id }).then(([l]) => {
       if (!l) { location.hash = '#/mine'; return }
-      setDraft({ title: l.title, description: l.description, category: l.category, location: l.location, price: l.price === null ? '' : String(l.price), price_unit: l.price_unit, images: images(l) })
+      setDraft({ title: l.title, description: l.description, category: l.category, location: l.location, images: images(l) })
     })
   }, [id])
 
@@ -83,12 +83,12 @@ export function ListingForm({ id }: { id?: string }) {
       }
       const params = {
         title: draft.title.trim(), description: draft.description, category: draft.category, location: draft.location.trim(),
-        lat, lng, price: draft.price === '' ? null : Number(draft.price), price_unit: draft.price_unit.trim(), images: JSON.stringify(draft.images),
+        lat, lng, images: JSON.stringify(draft.images),
       }
       const changes = id
         ? await x('update_listing', { id, ...params })
         : await x('create_listing', { id: crypto.randomUUID(), owner_name: user.name, ...params })
-      if (!changes) throw new Error('Nothing was saved. If you are editing, the listing may not be yours.')
+      if (!changes) throw new Error('Nothing was saved. You need the tradie role, or the service may not be yours.')
       location.hash = '#/mine'
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save')
@@ -98,7 +98,7 @@ export function ListingForm({ id }: { id?: string }) {
   }
 
   return (
-    <Section title={id ? 'Edit listing' : 'New listing'}>
+    <Section title={id ? 'Edit service' : 'Add a service'}>
       <form onSubmit={submit} className="max-w-xl space-y-4">
         <Field label="Title"><Input aria-label="Title" required maxLength={120} value={draft.title} onChange={(e) => set({ title: e.target.value })} /></Field>
         <Field label="Description"><TextArea aria-label="Description" rows={6} maxLength={4000} value={draft.description} onChange={(e) => set({ description: e.target.value })} /></Field>
@@ -108,9 +108,7 @@ export function ListingForm({ id }: { id?: string }) {
               {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </Field>
-          <Field label="Location"><Input aria-label="Location" placeholder="Suburb, city" value={draft.location} onChange={(e) => set({ location: e.target.value })} /></Field>
-          <Field label="Price"><Input aria-label="Price" type="number" min={0} step="0.01" value={draft.price} onChange={(e) => set({ price: e.target.value })} /></Field>
-          <Field label="Per"><Input aria-label="Price unit" placeholder="night, hour, month, fixed" value={draft.price_unit} onChange={(e) => set({ price_unit: e.target.value })} /></Field>
+          <Field label="Service area"><Input aria-label="Service area" placeholder="Suburb, city or region" value={draft.location} onChange={(e) => set({ location: e.target.value })} /></Field>
         </div>
         <Field label="Photos (up to 6)">
           <input aria-label="Photos" type="file" accept="image/*" multiple onChange={(e) => addPhotos(e.target.files)} className="block text-sm text-[var(--muted)]" />
@@ -127,7 +125,7 @@ export function ListingForm({ id }: { id?: string }) {
         ) : null}
         {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
         <div className="flex gap-2">
-          <Button type="submit" loading={busy}>{id ? 'Save changes' : 'Publish'}</Button>
+          <Button type="submit" loading={busy}>{id ? 'Save changes' : 'Publish service'}</Button>
           <Button type="button" variant="ghost" onClick={() => { location.hash = '#/mine' }}>Cancel</Button>
         </div>
       </form>
