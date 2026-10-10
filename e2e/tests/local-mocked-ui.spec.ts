@@ -113,9 +113,15 @@ async function mockedContext(browser: Browser, role: Role, store: Store): Promis
       }
       case 'list_my_quotes': return json(rows(store.quotes.filter((quote) => quote.tradie_id === currentUser.id)))
       case 'list_job_quotes': return json(rows(isOwner('job', String(params.job_id)) ? store.quotes.filter((quote) => quote.target_type === 'job' && quote.target_id === params.job_id) : []))
+      case 'revise_quote': {
+        const quote = store.quotes.find((item) => item.id === params.id)
+        if (!quote || quote.tradie_id !== currentUser.id || quote.status !== 'submitted' || Number(params.expected_revision) !== quote.revision) return json(changes(0))
+        quote.scope = String(params.scope); quote.amount = Number(params.amount); quote.currency = String(params.currency); quote.timing = String(params.timing); quote.valid_until = params.valid_until ? Number(params.valid_until) : null; quote.notes = String(params.notes ?? ''); quote.revision += 1; quote.updated_at = now
+        return json(changes())
+      }
       case 'accept_quote': case 'decline_quote': {
         const quote = store.quotes.find((item) => item.id === params.id)
-        if (!quote || !isOwner(quote.target_type, quote.target_id) || quote.status !== params.from) return json(changes(0))
+        if (!quote || !isOwner(quote.target_type, quote.target_id) || quote.status !== params.from || (action === 'accept_quote' && Number(params.expected_revision) !== quote.revision)) return json(changes(0))
         quote.status = action === 'accept_quote' ? 'accepted' : 'declined'; quote.accepted_at = action === 'accept_quote' ? now : null
         return json(changes())
       }
@@ -227,6 +233,25 @@ test('directory direct enquiry reaches tradie quote and agreement flow without a
   await customer.page.getByRole('button', { name: 'Agree to work' }).click()
   await expect(customer.page.getByText('Work status: agreed')).toBeVisible()
   await customer.context.close(); await tradie.context.close()
+})
+
+test('customer cannot accept an unseen revised quote and is shown its latest terms', async ({ browser }) => {
+  const store = seed()
+  store.jobs.push({ id: 'revision-job', lifecycle: 'open', title: 'Revision guard repair', description: 'A quote must be reviewed at its current revision.', category: 'plumber', location: 'Melbourne', owner_id: users.customer.id, created_at: now, updated_at: now })
+  store.quotes.push({ id: 'revision-quote', target_type: 'job', target_id: 'revision-job', status: 'submitted', scope: 'Initial scope at revision one', amount: 100, currency: 'AUD', timing: 'Next week', valid_until: null, notes: '', revision: 1, created_at: now, updated_at: now, accepted_at: null, tradie_id: users.tradie.id })
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/quotes')
+  await expect(customer.page.getByText('Initial scope at revision one')).toBeVisible()
+
+  const quote = store.quotes[0]!
+  quote.scope = 'Revised scope at revision two'; quote.amount = 1000; quote.revision = 2; quote.updated_at = now + 1
+
+  await customer.page.getByRole('button', { name: 'Accept quote' }).click()
+  await expect(customer.page.getByRole('alert')).toHaveText('This quote was revised before you could accept it. Please review the updated terms below.')
+  await expect(customer.page.getByText('Revised scope at revision two')).toBeVisible()
+  expect(quote.status).toBe('submitted')
+  expect(store.agreements).toHaveLength(0)
+  await customer.context.close()
 })
 
 test('direct enquiry controls are role-gated and private to its participants', async ({ browser }) => {

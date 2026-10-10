@@ -666,10 +666,10 @@
     },
     {
       "name": "revise_quote",
-      "description": "Revise the caller's submitted quote. Revision is guarded by the current status and replaces the informational terms atomically; it cannot change the customer, tradie, or target.",
+      "description": "Revise the caller's submitted quote only when its revision still matches the version the tradie reviewed. A stale revision changes zero rows, so the caller must refresh before replacing the informational terms; it cannot change the customer, tradie, or target.",
       "operation": "execute",
-      "sql": "UPDATE quotes SET scope = :scope, amount = :amount, currency = :currency, timing = :timing, valid_until = :valid_until, notes = :notes, revision = revision + 1, updated_at = :__now WHERE id = :id AND tradie_id = :__user_id AND status = 'submitted' AND length(trim(:scope)) BETWEEN 1 AND 4000 AND :amount >= 0 AND :amount <= 100000000 AND :currency GLOB '[A-Z][A-Z][A-Z]' AND length(trim(:timing)) BETWEEN 1 AND 500 AND length(trim(:notes)) <= 2000 AND (:valid_until IS NULL OR :valid_until > :__now)",
-      "params": { "id": { "type": "string", "description": "Quote id" }, "scope": { "type": "string", "description": "Proposed work scope" }, "amount": { "type": "number", "description": "Informational amount only" }, "currency": { "type": "string", "description": "Three-letter ISO currency code" }, "timing": { "type": "string", "description": "Indicative timing" }, "valid_until": { "type": "integer", "description": "Optional quote expiry timestamp in milliseconds", "optional": true }, "notes": { "type": "string", "description": "Private notes", "default": "" } },
+      "sql": "UPDATE quotes SET scope = :scope, amount = :amount, currency = :currency, timing = :timing, valid_until = :valid_until, notes = :notes, revision = revision + 1, updated_at = :__now WHERE id = :id AND tradie_id = :__user_id AND status = 'submitted' AND revision = :expected_revision AND length(trim(:scope)) BETWEEN 1 AND 4000 AND :amount >= 0 AND :amount <= 100000000 AND :currency GLOB '[A-Z][A-Z][A-Z]' AND length(trim(:timing)) BETWEEN 1 AND 500 AND length(trim(:notes)) <= 2000 AND (:valid_until IS NULL OR :valid_until > :__now)",
+      "params": { "id": { "type": "string", "description": "Quote id" }, "expected_revision": { "type": "number", "description": "Revision last observed by the caller; a mismatch is a no-op" }, "scope": { "type": "string", "description": "Proposed work scope" }, "amount": { "type": "number", "description": "Informational amount only" }, "currency": { "type": "string", "description": "Three-letter ISO currency code" }, "timing": { "type": "string", "description": "Indicative timing" }, "valid_until": { "type": "integer", "description": "Optional quote expiry timestamp in milliseconds", "optional": true }, "notes": { "type": "string", "description": "Private notes", "default": "" } },
       "requires_auth": true
     },
     {
@@ -682,10 +682,10 @@
     },
     {
       "name": "accept_quote",
-      "description": "Customer selects one currently valid submitted quote. The atomic no-accepted-quote guard makes simultaneous or stale selection attempts safe; amounts remain informational and payment is arranged outside Tradies.",
+      "description": "Customer selects one currently valid submitted quote only when its revision still matches the version they reviewed. The atomic no-accepted-quote and revision guards make simultaneous or stale selection attempts no-ops; amounts remain informational and payment is arranged outside Tradies.",
       "operation": "execute",
-      "sql": "UPDATE quotes SET status = 'accepted', accepted_at = :__now, updated_at = :__now WHERE id = :id AND customer_id = :__user_id AND status = :from AND :from = 'submitted' AND (valid_until IS NULL OR valid_until > :__now) AND ((target_type = 'job' AND EXISTS (SELECT 1 FROM jobs j WHERE j.id = quotes.target_id AND j.customer_id = :__user_id)) OR (target_type = 'request' AND EXISTS (SELECT 1 FROM requests r WHERE r.id = quotes.target_id AND r.requester_id = :__user_id AND r.status IN ('pending', 'accepted')))) AND NOT EXISTS (SELECT 1 FROM quotes selected WHERE selected.target_type = quotes.target_type AND selected.target_id = quotes.target_id AND selected.status = 'accepted')",
-      "params": { "id": { "type": "string", "description": "Quote id" }, "from": { "type": "string", "description": "Current quote status" } },
+      "sql": "UPDATE quotes SET status = 'accepted', accepted_at = :__now, updated_at = :__now WHERE id = :id AND customer_id = :__user_id AND status = :from AND :from = 'submitted' AND revision = :expected_revision AND (valid_until IS NULL OR valid_until > :__now) AND ((target_type = 'job' AND EXISTS (SELECT 1 FROM jobs j WHERE j.id = quotes.target_id AND j.customer_id = :__user_id)) OR (target_type = 'request' AND EXISTS (SELECT 1 FROM requests r WHERE r.id = quotes.target_id AND r.requester_id = :__user_id AND r.status IN ('pending', 'accepted')))) AND NOT EXISTS (SELECT 1 FROM quotes selected WHERE selected.target_type = quotes.target_type AND selected.target_id = quotes.target_id AND selected.status = 'accepted')",
+      "params": { "id": { "type": "string", "description": "Quote id" }, "from": { "type": "string", "description": "Current quote status" }, "expected_revision": { "type": "number", "description": "Revision last observed by the caller; a mismatch is a no-op" } },
       "requires_auth": true
     },
     {
