@@ -41,6 +41,8 @@ function seed() {
     failMessageSendAfterPersist: 0,
     delayMessageSendMs: 0,
     directSendIds: [] as string[],
+    failWorkMessageSendAfterPersist: 0,
+    workSendIds: [] as string[],
   }
 }
 
@@ -207,7 +209,12 @@ async function mockedContext(browser: Browser, role: Role | null, store: Store):
       case 'get_work_agreement': return json(rows(workAllowed(type, targetId) ? store.agreements.filter((item) => item.target_type === type && item.target_id === targetId) : []))
       case 'send_work_message': {
         if (!workAllowed(type, targetId) || params.recipient_id === currentUser.id) return json(changes(0))
-        store.messages.push({ id: String(params.id), target_type: type, target_id: targetId, sender_id: currentUser.id, sender_name: currentUser.name, recipient_id: String(params.recipient_id), body: String(params.body), created_at: now }); return json(changes())
+        const id = String(params.id)
+        store.workSendIds.push(id)
+        const exists = store.messages.some((message) => message.id === id)
+        if (!exists) store.messages.push({ id, target_type: type, target_id: targetId, sender_id: currentUser.id, sender_name: currentUser.name, recipient_id: String(params.recipient_id), body: String(params.body), created_at: now })
+        if (store.failWorkMessageSendAfterPersist > 0) { store.failWorkMessageSendAfterPersist--; return json({ error: 'mock work connection dropped after persistence' }, 500) }
+        return json(changes(exists ? 0 : 1))
       }
       case 'agree_work': {
         const quote = store.quotes.find((item) => item.id === params.quote_id)
@@ -443,6 +450,25 @@ test('direct enquiry thread retries failed loads and uncertain sends without dup
   await customer.context.close()
 })
 
+test('selected-work thread retries an uncertain send with the same id and no duplicate', async ({ browser }) => {
+  const store = seed()
+  store.jobs.push({ id: 'retry-work-job', lifecycle: 'open', title: 'Retry work message', description: 'A selected quote is required for this private thread.', category: 'plumber', location: 'Melbourne', owner_id: users.customer.id, created_at: now, updated_at: now })
+  store.quotes.push({ id: 'retry-work-quote', target_type: 'job', target_id: 'retry-work-job', status: 'accepted', scope: 'Retry-safe message scope', amount: 100, currency: 'AUD', timing: 'Tomorrow', valid_until: null, notes: '', revision: 1, created_at: now, updated_at: now, accepted_at: now, tradie_id: users.tradie.id })
+  store.failWorkMessageSendAfterPersist = 1
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/work/job/retry-work-job/tradie-1')
+  await customer.page.getByLabel('Work message').fill('This work message is safe to retry.')
+  await customer.page.getByRole('button', { name: 'Send' }).click()
+  await expect(customer.page.getByRole('alert')).toContainText('Your draft was kept; retrying will use the same message id.')
+  await expect(customer.page.getByLabel('Work message')).toHaveValue('This work message is safe to retry.')
+  await customer.page.getByRole('button', { name: 'Send' }).click()
+  await expect(customer.page.getByText('This work message is safe to retry.')).toBeVisible()
+  await expect(customer.page.getByLabel('Work message')).toHaveValue('')
+  expect(store.messages.filter((message) => message.body === 'This work message is safe to retry.')).toHaveLength(1)
+  expect(store.workSendIds.slice(-2)[0]).toBe(store.workSendIds.slice(-1)[0])
+  await customer.context.close()
+})
+
 test('direct and selected-work threads page tied timestamps without losing history or scroll position', async ({ browser }) => {
   const store = seed()
   store.requests.push({ id: 'paged-enquiry', listing_id: store.listing.id, requester_id: users.customer.id, requester_name: users.customer.name, status: 'pending', note: 'Paged private enquiry.', created_at: now, updated_at: now, listing_title: store.listing.title, owner_id: users.tradie.id, owner_name: users.tradie.name })
@@ -461,6 +487,7 @@ test('direct and selected-work threads page tied timestamps without losing histo
     const older = customer.page.getByRole('button', { name: 'Load older messages' })
     await older.focus()
     await older.press('Enter')
+    await expect(customer.page.getByText(`Direct history ${Math.max(0, 405 - ((page + 1) * 100))}`, { exact: true })).toBeVisible()
   }
   await expect(customer.page.getByText('Direct history 0')).toBeVisible()
   await expect(customer.page.getByText('Direct history 504')).toBeVisible()
@@ -472,7 +499,10 @@ test('direct and selected-work threads page tied timestamps without losing histo
   await customer.page.goto('/#/work/job/paged-job/tradie-1')
   await expect(customer.page.getByText('Work history 405')).toBeVisible()
   await expect(customer.page.getByText('Work history 404')).toHaveCount(0)
-  for (let page = 0; page < 5; page++) await customer.page.getByRole('button', { name: 'Load older messages' }).click()
+  for (let page = 0; page < 5; page++) {
+    await customer.page.getByRole('button', { name: 'Load older messages' }).click()
+    await expect(customer.page.getByText(`Work history ${Math.max(0, 405 - ((page + 1) * 100))}`, { exact: true })).toBeVisible()
+  }
   await expect(customer.page.getByText('Work history 0')).toBeVisible()
   await expect(customer.page.getByText('Work history 504')).toBeVisible()
   await customer.page.getByLabel('Work message').fill('Newest work message')

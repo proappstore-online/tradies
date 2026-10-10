@@ -235,6 +235,8 @@ ok(call('send_message', SEEKER, { id: 'direct-message-retry', listing_id: L, rec
 ok(call('send_message', STRANGER, { id: 'stranger-message', listing_id: L, recipient_id: SEEKER, sender_name: 'Stan', body: 'Hi' }) === 0, 'a third party cannot message a seeker about a listing they do not own')
 ok(call('send_message', OWNER, { id: 'self-message', listing_id: L, recipient_id: OWNER, sender_name: 'Olive', body: 'Me' }) === 0, 'messaging yourself is refused')
 ok(call('list_messages', STRANGER, { listing_id: L, other_id: OWNER }).length === 0, 'a stranger reads nothing from the thread')
+db.prepare('INSERT INTO messages (id, listing_id, sender_id, sender_name, recipient_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('orphan-direct-message', L, SEEKER, 'Sam', STRANGER, 'Orphaned row must not create a conversation.', Date.now())
+ok(call('list_messages', SEEKER, { listing_id: L, other_id: STRANGER }).length === 0 && !call('list_conversations', SEEKER).some((conversation) => conversation.other_id === STRANGER), 'direct history and inbox re-check the customer-to-tradie enquiry relationship instead of trusting matching message rows')
 const PAGED_LISTING = 'paging-listing'
 ok(call('create_listing', OWNER, { id: PAGED_LISTING, owner_name: 'Olive', title: 'Olive Paging Plumbing', description: 'A fixture used only to verify private thread paging.', category: 'plumber', location: 'Northside' }) === 1 && call('create_request', SEEKER, { id: 'paging-request', listing_id: PAGED_LISTING, requester_name: 'Sam', note: 'Please keep this thread private.' }) === 1, 'pagination fixture has a private direct enquiry')
 const TIED_TIME = 1_700_000_000_000

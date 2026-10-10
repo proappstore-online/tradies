@@ -32,6 +32,9 @@ ok(/WHERE user_id = :__user_id/.test(tools.get_my_profile?.sql ?? ''), 'a role r
 ok(/p\.role = 'tradie'/.test(tools.create_listing?.sql ?? '') && /p\.role = 'tradie'/.test(tools.update_listing?.sql ?? ''), 'only tradies can create or edit public service profiles')
 ok(/p\.role = 'customer'/.test(tools.create_job?.sql ?? '') && /customer_id = :__user_id/.test(tools.update_job?.sql ?? ''), 'only customers can create and own jobs')
 ok(/customer\.role = 'customer'/.test(tools.create_request?.sql ?? '') && /tradie\.role = 'tradie'/.test(tools.create_request?.sql ?? ''), 'direct enquiries require a customer-to-tradie pair')
+ok(/requests r JOIN listings l/.test(tools.list_messages?.sql ?? '') && /r\.requester_id = :__user_id/.test(tools.list_messages?.sql ?? '') && /participant_listing/.test(tools.list_conversations?.sql ?? ''), 'direct history and inbox re-check the underlying customer-to-tradie enquiry relationship')
+ok(/q\.status = 'accepted'/.test(tools.send_work_message?.sql ?? '') && /q\.customer_id = :__user_id/.test(tools.send_work_message?.sql ?? '') && /q\.tradie_id = :recipient_id/.test(tools.send_work_message?.sql ?? '') && /NOT EXISTS \(SELECT 1 FROM blocks/.test(tools.send_work_message?.sql ?? ''), 'selected-work sends require exact accepted-quote participants and preserve block guards')
+ok(/INSERT OR IGNORE INTO work_agreements/.test(tools.agree_work?.sql ?? '') && /q\.status = 'accepted'/.test(tools.agree_work?.sql ?? '') && /q\.customer_id = :__user_id/.test(tools.agree_work?.sql ?? '') && /customer_completed/.test(tools.complete_work?.sql ?? '') && /tradie_completed/.test(tools.complete_work?.sql ?? ''), 'work agreement creation is retry-safe and completion remains a two-participant forward-only state machine')
 
 const privateFields = /\b(customer_id|requester_id|tradie_id|private_address|contact_details|note|body|amount|currency|scope|timing)\b/i
 const publicTools = manifest.tools.filter((tool) => tool.requires_auth === false)

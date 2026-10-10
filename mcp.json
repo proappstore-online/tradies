@@ -371,7 +371,7 @@
       "name": "list_messages",
       "description": "A bounded chronological page from the private thread between the caller and one other person about a listing. Without a cursor it returns the latest page; use the oldest row's created_at and id to retrieve older history. Only the two parties can read it.",
       "operation": "query",
-      "sql": "SELECT id, listing_id, sender_id, sender_name, recipient_id, body, created_at FROM (SELECT id, listing_id, sender_id, sender_name, recipient_id, body, created_at FROM messages WHERE listing_id = :listing_id AND ((sender_id = :__user_id AND recipient_id = :other_id) OR (sender_id = :other_id AND recipient_id = :__user_id)) AND (:before_created_at IS NULL OR created_at < :before_created_at OR (created_at = :before_created_at AND id < :before_id)) ORDER BY created_at DESC, id DESC LIMIT 100) page ORDER BY created_at ASC, id ASC",
+      "sql": "SELECT id, listing_id, sender_id, sender_name, recipient_id, body, created_at FROM (SELECT id, listing_id, sender_id, sender_name, recipient_id, body, created_at FROM messages WHERE listing_id = :listing_id AND ((sender_id = :__user_id AND recipient_id = :other_id) OR (sender_id = :other_id AND recipient_id = :__user_id)) AND EXISTS (SELECT 1 FROM requests r JOIN listings l ON l.id = r.listing_id WHERE r.listing_id = :listing_id AND ((r.requester_id = :__user_id AND l.owner_id = :other_id) OR (l.owner_id = :__user_id AND r.requester_id = :other_id))) AND (:before_created_at IS NULL OR created_at < :before_created_at OR (created_at = :before_created_at AND id < :before_id)) ORDER BY created_at DESC, id DESC LIMIT 100) page ORDER BY created_at ASC, id ASC",
       "params": {
         "listing_id": {
           "type": "string",
@@ -398,7 +398,7 @@
       "name": "list_conversations",
       "description": "The caller's threads, most recent activity first: listing, the other party, last message time.",
       "operation": "query",
-      "sql": "SELECT m.listing_id, l.title AS listing_title, CASE WHEN m.sender_id = :__user_id THEN m.recipient_id ELSE m.sender_id END AS other_id, COALESCE(MAX(CASE WHEN m.sender_id != :__user_id THEN m.sender_name END), l.owner_name) AS other_name, MAX(m.created_at) AS last_at FROM messages m JOIN listings l ON l.id = m.listing_id WHERE m.sender_id = :__user_id OR m.recipient_id = :__user_id GROUP BY m.listing_id, other_id ORDER BY last_at DESC LIMIT 100",
+      "sql": "SELECT m.listing_id, l.title AS listing_title, CASE WHEN m.sender_id = :__user_id THEN m.recipient_id ELSE m.sender_id END AS other_id, COALESCE(MAX(CASE WHEN m.sender_id != :__user_id THEN m.sender_name END), l.owner_name) AS other_name, MAX(m.created_at) AS last_at FROM messages m JOIN listings l ON l.id = m.listing_id WHERE (m.sender_id = :__user_id OR m.recipient_id = :__user_id) AND EXISTS (SELECT 1 FROM requests r JOIN listings participant_listing ON participant_listing.id = r.listing_id WHERE r.listing_id = m.listing_id AND ((r.requester_id = m.sender_id AND participant_listing.owner_id = m.recipient_id) OR (participant_listing.owner_id = m.sender_id AND r.requester_id = m.recipient_id))) GROUP BY m.listing_id, other_id ORDER BY last_at DESC LIMIT 100",
       "params": {},
       "requires_auth": true
     },
