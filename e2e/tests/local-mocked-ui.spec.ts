@@ -14,6 +14,7 @@ type Request = { id: string; listing_id: string; requester_id: string; requester
 type WorkMessage = { id: string; target_type: 'job' | 'request'; target_id: string; sender_id: string; sender_name: string; recipient_id: string; body: string; created_at: number }
 type DirectMessage = { id: string; listing_id: string; sender_id: string; sender_name: string; recipient_id: string; body: string; created_at: number }
 type Agreement = { target_type: 'job' | 'request'; target_id: string; quote_id: string; status: 'agreed' | 'customer_completed' | 'tradie_completed' | 'completed'; agreed_at: number; updated_at: number; completed_at: number | null }
+type Block = { blocked_id: string; created_at: number }
 
 const users: Record<Role, User> = {
   customer: { id: 'customer-1', login: 'casey.customer', name: 'Casey Customer' },
@@ -32,6 +33,7 @@ function seed() {
     messages: [] as WorkMessage[],
     directMessages: [] as DirectMessage[],
     agreements: [] as Agreement[],
+    blocks: [] as Block[],
     listing: { id: 'listing-1', owner_id: users.tradie.id, owner_name: users.tradie.name, status: 'active', title: 'Taylor Plumbing', description: 'Licensed plumbing repairs and installations.', category: 'plumber', location: 'Melbourne', lat: null, lng: null, images: '[]', created_at: now, updated_at: now } as PublicListing,
     providerListings: [] as PublicListing[],
     delayDirectory: false,
@@ -43,6 +45,13 @@ function seed() {
     directSendIds: [] as string[],
     failWorkMessageSendAfterPersist: 0,
     workSendIds: [] as string[],
+    failBlockLoads: 0,
+    failBlocks: 0,
+    failReports: 0,
+    failUnblocks: 0,
+    blockDelayMs: 0,
+    blockCalls: 0,
+    reportCalls: 0,
   }
 }
 
@@ -113,6 +122,29 @@ async function mockedContext(browser: Browser, role: Role | null, store: Store):
       case 'listing_stats': return json(rows([{ review_count: 0, avg_rating: null }]))
       case 'list_my_favorite_ids': case 'list_my_favorites': return json(rows([]))
       case 'get_my_profile': return json(rows([{ user_id: currentUser.id, role: currentRole === 'tradie' || currentRole === 'rivalTradie' ? 'tradie' : 'customer', trade_category: currentRole === 'tradie' || currentRole === 'rivalTradie' ? 'plumber' : '' }]))
+      case 'list_blocks':
+        if (store.failBlockLoads > 0) { store.failBlockLoads--; return json({ error: 'mock blocked-users service unavailable' }, 500) }
+        return json(rows(store.blocks))
+      case 'block_user': {
+        store.blockCalls++
+        if (store.blockDelayMs) await new Promise((resolve) => setTimeout(resolve, store.blockDelayMs))
+        if (store.failBlocks > 0) { store.failBlocks--; return json({ error: 'mock block failed' }, 500) }
+        const blockedId = String(params.blocked_id)
+        if (!blockedId || store.blocks.some((block) => block.blocked_id === blockedId)) return json(changes(0))
+        store.blocks.push({ blocked_id: blockedId, created_at: now })
+        return json(changes())
+      }
+      case 'report_user':
+        store.reportCalls++
+        if (store.failReports > 0) { store.failReports--; return json({ error: 'mock report failed' }, 500) }
+        return json(changes(String(params.reported_id) ? 1 : 0))
+      case 'unblock_user': {
+        if (store.failUnblocks > 0) { store.failUnblocks--; return json({ error: 'mock unblock failed' }, 500) }
+        const index = store.blocks.findIndex((block) => block.blocked_id === params.blocked_id)
+        if (index < 0) return json(changes(0))
+        store.blocks.splice(index, 1)
+        return json(changes())
+      }
       case 'list_jobs':
         if (store.failJobs) return json({ error: 'mock job service unavailable' }, 500)
         return json(rows(store.jobs.filter((job) => job.lifecycle === 'open').map(({ owner_id, private_address, contact_details, ...job }) => job)))
@@ -663,6 +695,77 @@ test('unrelated user cannot read selected-work quotes or private messages', asyn
   await expect(outsider.page.getByText('Secret quote scope')).toHaveCount(0)
   await expect(outsider.page.getByText('Discuss the scope and timing here.')).toBeVisible()
   await outsider.context.close()
+})
+
+test('settings retries an initially failed blocked-users load without claiming nobody is blocked', async ({ browser }) => {
+  const store = seed()
+  // React StrictMode invokes the initial effect twice in this local app.
+  store.failBlockLoads = 2
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/settings')
+  await expect(customer.page.getByRole('alert')).toContainText('mock blocked-users service unavailable')
+  await expect(customer.page.getByText('Nobody.')).toHaveCount(0)
+  await customer.page.getByRole('button', { name: 'Retry' }).click()
+  await expect(customer.page.getByText('Nobody.')).toBeVisible()
+  await expect(customer.page.getByRole('alert')).toHaveCount(0)
+  await customer.context.close()
+})
+
+test('settings preserves failed block and report drafts, validates reports, and prevents a duplicate pending block', async ({ browser }) => {
+  const store = seed()
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/settings')
+  await expect(customer.page.getByText('Nobody.')).toBeVisible()
+
+  store.failBlocks = 1
+  await customer.page.getByLabel('User id').fill('unsafe-user')
+  await customer.page.getByRole('button', { name: 'Block', exact: true }).click()
+  await expect(customer.page.getByRole('alert')).toContainText('mock block failed')
+  await expect(customer.page.getByLabel('User id')).toHaveValue('unsafe-user')
+
+  store.failReports = 1
+  await customer.page.getByLabel('User id').fill('report-user')
+  await customer.page.getByLabel('Reason').selectOption('abuse')
+  await customer.page.getByLabel('Details').fill('Synthetic report details that must remain on failure.')
+  await customer.page.getByRole('button', { name: 'Report' }).click()
+  await expect(customer.page.getByRole('alert')).toContainText('mock report failed')
+  await expect(customer.page.getByLabel('User id')).toHaveValue('report-user')
+  await expect(customer.page.getByLabel('Reason')).toHaveValue('abuse')
+  await expect(customer.page.getByLabel('Details')).toHaveValue('Synthetic report details that must remain on failure.')
+
+  await customer.page.getByLabel('User id').fill('')
+  await customer.page.getByRole('button', { name: 'Report' }).click()
+  await expect(customer.page.getByRole('alert')).toContainText('Enter a user id before sending a report.')
+  expect(store.reportCalls).toBe(1)
+
+  store.blockDelayMs = 300
+  await customer.page.getByLabel('User id').fill('blocked-once')
+  await customer.page.getByRole('button', { name: 'Block' }).click()
+  await expect(customer.page.getByRole('button', { name: 'Block' })).toBeDisabled()
+  await expect(customer.page.getByRole('button', { name: 'Report' })).toBeDisabled()
+  await customer.page.getByRole('button', { name: 'Block' }).evaluate((button: HTMLButtonElement) => button.click())
+  await expect(customer.page.getByText('blocked-once')).toBeVisible()
+  expect(store.blockCalls).toBe(2)
+  await customer.context.close()
+})
+
+test('settings keeps a failed unblock visible and refreshes the list after a successful block', async ({ browser }) => {
+  const store = seed()
+  store.blocks.push({ blocked_id: 'existing-block', created_at: now })
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/settings')
+  await expect(customer.page.getByText('existing-block')).toBeVisible()
+
+  store.failUnblocks = 1
+  await customer.page.getByRole('button', { name: 'Unblock' }).click()
+  await expect(customer.page.getByRole('alert')).toContainText('mock unblock failed')
+  await expect(customer.page.getByText('existing-block')).toBeVisible()
+
+  await customer.page.getByLabel('User id').fill('recovered-block')
+  await customer.page.getByRole('button', { name: 'Block', exact: true }).click()
+  await expect(customer.page.getByText('recovered-block')).toBeVisible()
+  await expect(customer.page.getByText('Blocked. They can no longer message you or request your listings.')).toBeVisible()
+  await customer.context.close()
 })
 
 test('keyboard filtering and mobile layout remain usable', async ({ browser }) => {
