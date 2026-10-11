@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { Button, Input } from '@proappstore/sdk/ui'
-import { app, pub, q, x, when, type Conversation, type Listing, type Message, type WorkAgreement, type WorkConversation, type WorkMessage } from '../api'
+import { app, pub, q, x, when, type Conversation, type Listing, type Message, type Profile, type WorkAgreement, type WorkConversation, type WorkMessage } from '../api'
 import { Empty, Section } from '../components'
 
 const MESSAGE_PAGE_SIZE = 100
@@ -72,6 +72,7 @@ export function Conversations() {
 export function WorkThread({ targetType, targetId, otherId }: { targetType: 'job' | 'request'; targetId: string; otherId: string }) {
   const [rows, setRows] = useState<WorkMessage[]>([])
   const [agreement, setAgreement] = useState<WorkAgreement | null>(null)
+  const [profile, setProfile] = useState<Profile | null>(null)
   const [body, setBody] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -81,13 +82,15 @@ export function WorkThread({ targetType, targetId, otherId }: { targetType: 'job
   const pendingMessage = useRef<{ id: string; body: string } | null>(null)
   const me = app.auth.user
   const loadLatest = useCallback(async ({ reset = false }: { reset?: boolean } = {}) => {
-    const [messages, agreements] = await Promise.all([
+    const [messages, agreements, profiles] = await Promise.all([
       q<WorkMessage>('list_work_messages', { target_type: targetType, target_id: targetId, other_id: otherId }),
       q<WorkAgreement>('get_work_agreement', { target_type: targetType, target_id: targetId }),
+      q<Profile>('get_my_profile'),
     ])
     snapshotForLatest()
     setRows((current) => reset ? chronological(messages) : chronological(current, messages))
     setAgreement(agreements[0] ?? null)
+    setProfile(profiles[0] ?? null)
     if (reset) setHasOlder(messages.length === MESSAGE_PAGE_SIZE)
     return messages
   }, [otherId, snapshotForLatest, targetId, targetType])
@@ -154,9 +157,18 @@ export function WorkThread({ targetType, targetId, otherId }: { targetType: 'job
     } finally { setSaving(false) }
   }
   const otherName = rows.find((m) => m.sender_id === otherId)?.sender_name ?? 'Work participant'
+  const isCustomer = profile?.role === 'customer'
+  const canConfirmCompletion = agreement?.status === 'agreed'
+    || (agreement?.status === 'customer_completed' && !isCustomer)
+    || (agreement?.status === 'tradie_completed' && isCustomer)
+  const waitingForOther = (agreement?.status === 'customer_completed' && isCustomer)
+    ? 'Waiting for tradie to confirm completion'
+    : (agreement?.status === 'tradie_completed' && !isCustomer)
+      ? 'Waiting for customer to confirm completion'
+      : null
   return <Section title={otherName} action={<a href="#/messages" className="text-sm text-[var(--accent)] underline-offset-4 hover:underline">← Inbox</a>}>
     <p className="mb-3 text-sm text-[var(--muted)]">Private selected-work conversation. Quote amounts are informational only; arrange payment directly outside Tradies.</p>
-    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--radius-sm)] bg-[var(--accent-soft)] p-3 text-sm text-[var(--ink)]"><span>{agreement ? `Work status: ${agreement.status.replace('_', ' ')}` : 'Quote selected — customer can agree to work.'}</span>{!agreement ? <Button size="sm" loading={saving} disabled={saving} onClick={agree}>Agree to work</Button> : agreement.status !== 'completed' ? <Button size="sm" loading={saving} disabled={saving} onClick={complete}>Confirm completion</Button> : null}</div>
+    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--radius-sm)] bg-[var(--accent-soft)] p-3 text-sm text-[var(--ink)]"><span>{agreement ? `Work status: ${agreement.status.replace('_', ' ')}` : 'Quote selected — customer can agree to work.'}</span>{!agreement && isCustomer ? <Button size="sm" loading={saving} disabled={saving} onClick={agree}>Agree to work</Button> : null}{canConfirmCompletion ? <Button size="sm" loading={saving} disabled={saving} onClick={complete}>Confirm completion</Button> : null}{waitingForOther ? <span className="text-[var(--muted)]">{waitingForOther}</span> : null}</div>
     <div ref={box} className="max-h-[60dvh] space-y-2 overflow-y-auto rounded-[var(--radius)] border border-[var(--line)] p-3"><OlderButton hasOlder={hasOlder} loading={loadingOlder} onClick={() => { void loadOlder() }} />{rows.length === 0 ? <p className="text-sm text-[var(--muted)]">Discuss the scope and timing here.</p> : null}{rows.map((m) => <div key={m.id} className={`max-w-[80%] rounded-[var(--radius-sm)] px-3 py-2 text-sm ${m.sender_id === me?.id ? 'ml-auto bg-[var(--accent-soft)] text-[var(--accent-deep)]' : 'bg-[var(--paper-deep)] text-[var(--ink)]'}`}><p className="whitespace-pre-wrap">{m.body}</p><p className="mt-1 text-[10px] opacity-70">{when(m.created_at)}</p></div>)}</div>
     <form onSubmit={send} className="mt-3 flex gap-2"><div className="flex-1"><Input aria-label="Work message" placeholder="Write a message" maxLength={2000} value={body} onChange={(e) => setBody(e.target.value)} /></div><Button type="submit" loading={saving} disabled={saving}>Send</Button></form>
     {error ? <p role="alert" className="mt-2 text-sm text-[var(--danger)]">{error}</p> : null}<p className="mt-3 text-xs text-[var(--muted)]"><a href="#/settings" className="underline-offset-4 hover:underline">Block or report</a> this person from Settings.</p>

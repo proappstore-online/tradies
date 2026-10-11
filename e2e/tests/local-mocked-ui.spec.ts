@@ -224,8 +224,18 @@ async function mockedContext(browser: Browser, role: Role | null, store: Store):
       }
       case 'complete_work': {
         const agreement = store.agreements.find((item) => item.target_type === type && item.target_id === targetId)
-        if (!agreement || !workAllowed(type, targetId)) return json(changes(0))
-        agreement.status = 'completed'; agreement.updated_at = now; agreement.completed_at = now; return json(changes())
+        const quote = selectedQuote(store, type, targetId)
+        const customer = isOwner(type, targetId)
+        const tradie = quote?.tradie_id === currentUser.id
+        if (!agreement || !quote || !workAllowed(type, targetId)) return json(changes(0))
+        const next = (agreement.status === 'agreed' && customer) ? 'customer_completed'
+          : (agreement.status === 'agreed' && tradie) ? 'tradie_completed'
+            : (agreement.status === 'customer_completed' && tradie) ? 'completed'
+              : (agreement.status === 'tradie_completed' && customer) ? 'completed'
+                : null
+        if (!next) return json(changes(0))
+        agreement.status = next; agreement.updated_at = now; agreement.completed_at = next === 'completed' ? now : null
+        return json(changes())
       }
       default: return json(rows([]))
     }
@@ -266,6 +276,9 @@ test('customer job post, tradie quote, selected-work discussion, agreement and c
   await expect(customer.page.getByText('Replace the leaking kitchen tap and test fittings.')).toBeVisible()
   await customer.page.getByRole('button', { name: 'Accept quote' }).click()
   await expect(customer.page.getByText('accepted', { exact: true })).toBeVisible()
+  await tradie.page.goto(`/#/work/job/${job.id}/${users.customer.id}`)
+  await expect(tradie.page.getByRole('button', { name: 'Agree to work' })).toHaveCount(0)
+  await tradie.context.close()
   await customer.page.goto(`/#/work/job/${job.id}/${users.tradie.id}`)
   await customer.page.getByLabel('Work message').fill('Please arrive after 9am.')
   await customer.page.getByRole('button', { name: 'Send' }).click()
@@ -273,8 +286,29 @@ test('customer job post, tradie quote, selected-work discussion, agreement and c
   await customer.page.getByRole('button', { name: 'Agree to work' }).click()
   await expect(customer.page.getByText('Work status: agreed')).toBeVisible()
   await customer.page.getByRole('button', { name: 'Confirm completion' }).click()
-  await expect(customer.page.getByText('Work status: completed')).toBeVisible()
-  await customer.context.close(); await tradie.context.close()
+  await expect(customer.page.getByText('Work status: customer completed')).toBeVisible()
+  await expect(customer.page.getByText('Waiting for tradie to confirm completion')).toBeVisible()
+  await expect(customer.page.getByRole('button', { name: 'Confirm completion' })).toHaveCount(0)
+  const completingTradie = await mockedContext(browser, 'tradie', store)
+  await completingTradie.page.goto(`/#/work/job/${job.id}/${users.customer.id}`)
+  await expect(completingTradie.page.getByText('Work status: customer completed')).toBeVisible()
+  await completingTradie.page.getByRole('button', { name: 'Confirm completion' }).click()
+  await expect(completingTradie.page.getByText('Work status: completed')).toBeVisible()
+  await customer.context.close(); await completingTradie.context.close()
+})
+
+test('customer cannot confirm completion twice after their first confirmation', async ({ browser }) => {
+  const store = seed()
+  store.jobs.push({ id: 'two-party-completion-job', lifecycle: 'open', title: 'Two-party completion', description: 'Completion requires both selected-work participants.', category: 'plumber', location: 'Melbourne', owner_id: users.customer.id, created_at: now, updated_at: now })
+  store.quotes.push({ id: 'two-party-completion-quote', target_type: 'job', target_id: 'two-party-completion-job', status: 'accepted', scope: 'Two-party completion scope', amount: 100, currency: 'AUD', timing: 'Tomorrow', valid_until: null, notes: '', revision: 1, created_at: now, updated_at: now, accepted_at: now, tradie_id: users.tradie.id })
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/work/job/two-party-completion-job/tradie-1')
+  await customer.page.getByRole('button', { name: 'Agree to work' }).click()
+  await customer.page.getByRole('button', { name: 'Confirm completion' }).click()
+  await expect(customer.page.getByText('Work status: customer completed')).toBeVisible()
+  await expect(customer.page.getByText('Waiting for tradie to confirm completion')).toBeVisible()
+  await expect(customer.page.getByRole('button', { name: 'Confirm completion' })).toHaveCount(0)
+  await customer.context.close()
 })
 
 test('a tradie can revise then withdraw a submitted quote, and the customer cannot select it', async ({ browser }) => {
