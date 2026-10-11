@@ -52,6 +52,14 @@ function seed() {
     blockDelayMs: 0,
     blockCalls: 0,
     reportCalls: 0,
+    favorites: {} as Record<string, string[]>,
+    failFavoriteIdLoads: 0,
+    failFavoriteLoads: 0,
+    failFavoriteAdds: 0,
+    failFavoriteRemoves: 0,
+    favoriteDelayMs: 0,
+    favoriteListDelays: [] as number[],
+    favoriteCalls: [] as string[],
   }
 }
 
@@ -120,7 +128,29 @@ async function mockedContext(browser: Browser, role: Role | null, store: Store):
       case 'get_listing': return json(rows([store.listing, ...store.providerListings].filter((listing) => String(params.id) === listing.id && listing.status === 'active')))
       case 'list_reviews': return json(rows([]))
       case 'listing_stats': return json(rows([{ review_count: 0, avg_rating: null }]))
-      case 'list_my_favorite_ids': case 'list_my_favorites': return json(rows([]))
+      case 'list_my_favorite_ids':
+        if (store.failFavoriteIdLoads > 0) { store.failFavoriteIdLoads--; return json({ error: 'mock favourites unavailable' }, 500) }
+        return json(rows((store.favorites[currentUser.id] ?? []).map((listing_id) => ({ listing_id }))))
+      case 'list_my_favorites': {
+        if (store.failFavoriteLoads > 0) { store.failFavoriteLoads--; return json({ error: 'mock saved list unavailable' }, 500) }
+        // Snapshot at request time so a delayed response is genuinely stale.
+        const ids = [...(store.favorites[currentUser.id] ?? [])]
+        const delay = store.favoriteListDelays.shift() ?? 0
+        if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+        return json(rows([store.listing, ...store.providerListings].filter((listing) => ids.includes(listing.id) && listing.status === 'active')))
+      }
+      case 'add_favorite': case 'remove_favorite': {
+        store.favoriteCalls.push(`${action}:${String(params.listing_id)}`)
+        if (store.favoriteDelayMs) await new Promise((resolve) => setTimeout(resolve, store.favoriteDelayMs))
+        if (action === 'add_favorite' && store.failFavoriteAdds > 0) { store.failFavoriteAdds--; return json({ error: 'mock save failed' }, 500) }
+        if (action === 'remove_favorite' && store.failFavoriteRemoves > 0) { store.failFavoriteRemoves--; return json({ error: 'mock remove failed' }, 500) }
+        const mine = store.favorites[currentUser.id] ??= []
+        const id = String(params.listing_id)
+        const has = mine.includes(id)
+        if (action === 'add_favorite' && !has) { mine.push(id); return json(changes()) }
+        if (action === 'remove_favorite' && has) { mine.splice(mine.indexOf(id), 1); return json(changes()) }
+        return json(changes(0))
+      }
       case 'get_my_profile': return json(rows([{ user_id: currentUser.id, role: currentRole === 'tradie' || currentRole === 'rivalTradie' ? 'tradie' : 'customer', trade_category: currentRole === 'tradie' || currentRole === 'rivalTradie' ? 'plumber' : '' }]))
       case 'list_blocks':
         if (store.failBlockLoads > 0) { store.failBlockLoads--; return json({ error: 'mock blocked-users service unavailable' }, 500) }
@@ -765,6 +795,131 @@ test('settings keeps a failed unblock visible and refreshes the list after a suc
   await customer.page.getByRole('button', { name: 'Block', exact: true }).click()
   await expect(customer.page.getByText('recovered-block')).toBeVisible()
   await expect(customer.page.getByText('Blocked. They can no longer message you or request your listings.')).toBeVisible()
+  await customer.context.close()
+})
+
+function secondListing(): PublicListing {
+  return { id: 'listing-2', owner_id: users.rivalTradie.id, owner_name: users.rivalTradie.name, status: 'active', title: 'Riley Electrical', description: 'Electrical fault finding.', category: 'electrician', location: 'Geelong', lat: null, lng: null, images: '[]', created_at: now - 1, updated_at: now - 1 }
+}
+
+function heart(page: Page, title: string) {
+  return page.locator('div', { has: page.getByRole('heading', { name: title, exact: true }) }).last().getByRole('button', { name: /^(Save|Remove from saved)$/ })
+}
+
+test('favourites retry an initially failed load instead of showing nothing saved', async ({ browser }) => {
+  const store = seed()
+  store.favorites[users.customer.id] = ['listing-1']
+  // Failures persist until cleared: StrictMode's discarded first effect run would consume a one-shot failure.
+  store.failFavoriteIdLoads = 99
+  store.failFavoriteLoads = 99
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/browse')
+  await expect(customer.page.getByRole('alert')).toContainText('mock favourites unavailable')
+  await expect(heart(customer.page, 'Taylor Plumbing')).toHaveAttribute('aria-pressed', 'false')
+  store.failFavoriteIdLoads = 0
+  await customer.page.getByRole('button', { name: 'Try again' }).click()
+  await expect(heart(customer.page, 'Taylor Plumbing')).toHaveAttribute('aria-pressed', 'true')
+  await expect(customer.page.getByRole('alert')).toHaveCount(0)
+
+  await customer.page.goto('/#/saved')
+  await expect(customer.page.getByRole('alert')).toContainText('mock saved list unavailable')
+  await expect(customer.page.getByText('Nothing saved')).toHaveCount(0)
+  store.failFavoriteLoads = 0
+  await customer.page.getByRole('button', { name: 'Try again' }).click()
+  await expect(customer.page.getByRole('heading', { name: 'Taylor Plumbing' })).toBeVisible()
+  await expect(customer.page.getByRole('alert')).toHaveCount(0)
+  await customer.context.close()
+})
+
+test('a failed save or remove rolls the heart back and reports the failure', async ({ browser }) => {
+  const store = seed()
+  store.providerListings.push(secondListing())
+  store.favorites[users.customer.id] = ['listing-2']
+  store.failFavoriteAdds = 1
+  store.failFavoriteRemoves = 2
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/browse')
+  await expect(heart(customer.page, 'Riley Electrical')).toHaveAttribute('aria-pressed', 'true')
+
+  await heart(customer.page, 'Taylor Plumbing').click()
+  await expect(customer.page.getByRole('alert')).toContainText('mock save failed')
+  await expect(heart(customer.page, 'Taylor Plumbing')).toHaveAttribute('aria-pressed', 'false')
+
+  await heart(customer.page, 'Riley Electrical').click()
+  await expect(customer.page.getByRole('alert')).toContainText('mock remove failed')
+  await expect(heart(customer.page, 'Riley Electrical')).toHaveAttribute('aria-pressed', 'true')
+  expect(store.favorites[users.customer.id]).toEqual(['listing-2'])
+
+  await customer.page.goto('/#/saved')
+  await heart(customer.page, 'Riley Electrical').click()
+  await expect(customer.page.getByRole('alert')).toContainText('mock remove failed')
+  await expect(customer.page.getByRole('heading', { name: 'Riley Electrical' })).toBeVisible()
+
+  await heart(customer.page, 'Riley Electrical').click()
+  await expect(customer.page.getByText('Nothing saved')).toBeVisible()
+  await expect(customer.page.getByRole('alert')).toHaveCount(0)
+  expect(store.favorites[users.customer.id]).toEqual([])
+  await customer.context.close()
+})
+
+test('a repeated click while a save is pending sends one request', async ({ browser }) => {
+  const store = seed()
+  store.favoriteDelayMs = 600
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/browse')
+  const button = heart(customer.page, 'Taylor Plumbing')
+  await expect(button).toHaveAttribute('aria-pressed', 'false')
+  await button.click()
+  await button.click()
+  await button.click()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
+  await customer.page.waitForTimeout(800)
+  expect(store.favoriteCalls).toEqual(['add_favorite:listing-1'])
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
+  await customer.context.close()
+})
+
+test('favourites stay within one account across sign-out and a different sign-in', async ({ browser }) => {
+  const store = seed()
+  store.providerListings.push(secondListing())
+  store.favorites[users.customer.id] = ['listing-1']
+  store.favorites[users.outsider.id] = ['listing-2']
+  const { context, page } = await mockedContext(browser, 'customer', store)
+  await page.goto('/#/browse')
+  await expect(heart(page, 'Taylor Plumbing')).toHaveAttribute('aria-pressed', 'true')
+
+  await page.getByRole('button', { name: 'C', exact: true }).click()
+  await page.getByRole('button', { name: 'Sign out' }).click()
+  await expect(page.getByRole('heading', { name: 'Taylor Plumbing' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^(Save|Remove from saved)$/ })).toHaveCount(0)
+
+  await context.clearCookies()
+  await context.addCookies([{ name: 'e2e_session', value: 'outsider', url: 'http://127.0.0.1:4187', sameSite: 'Lax' }])
+  await page.reload()
+  await expect(heart(page, 'Riley Electrical')).toHaveAttribute('aria-pressed', 'true')
+  await expect(heart(page, 'Taylor Plumbing')).toHaveAttribute('aria-pressed', 'false')
+  await page.goto('/#/saved')
+  await expect(page.getByRole('heading', { name: 'Riley Electrical' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Taylor Plumbing' })).toHaveCount(0)
+  await context.close()
+})
+
+test('a slow saved-list response cannot overwrite a newer one', async ({ browser }) => {
+  const store = seed()
+  store.providerListings.push(secondListing())
+  store.favorites[users.customer.id] = ['listing-1', 'listing-2']
+  const customer = await mockedContext(browser, 'customer', store)
+  await customer.page.goto('/#/saved')
+  await expect(customer.page.getByRole('heading', { name: 'Riley Electrical' })).toBeVisible()
+  // The reload after the first removal is slow and still lists Riley; the one after the second is fast.
+  store.favoriteListDelays = [1200, 0]
+  await heart(customer.page, 'Taylor Plumbing').click()
+  await expect.poll(() => store.favorites[users.customer.id]).toEqual(['listing-2'])
+  await heart(customer.page, 'Riley Electrical').click()
+  await expect(customer.page.getByText('Nothing saved')).toBeVisible()
+  await customer.page.waitForTimeout(1500)
+  await expect(customer.page.getByText('Nothing saved')).toBeVisible()
+  await expect(customer.page.getByRole('heading', { name: 'Riley Electrical' })).toHaveCount(0)
   await customer.context.close()
 })
 

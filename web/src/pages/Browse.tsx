@@ -1,25 +1,73 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useAuth } from '@proappstore/sdk'
 import { Button, Input } from '@proappstore/sdk/ui'
 import { app, pub, q, x, CATEGORIES, type Listing } from '../api'
 import { Empty, ListingCard, Section } from '../components'
 
-/** Saved ids for the signed-in user; empty and inert when signed out. */
+function message(cause: unknown, fallback: string) {
+  return cause instanceof Error ? cause.message : fallback
+}
+
+export function SavedAlert({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--danger)] p-3 text-sm text-[var(--danger)]"><span>{error}</span><Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button></div>
+}
+
+/**
+ * Saved ids for the signed-in user; empty and inert when signed out. Keyed on the user id so
+ * an account change starts from an empty set and late responses for the previous user are dropped.
+ */
 export function useSaved() {
+  const { user } = useAuth(app)
+  const userId = user?.id ?? null
   const [saved, setSaved] = useState<Set<string>>(new Set())
-  const signedIn = !!app.auth.user
+  const [error, setError] = useState('')
+  const [attempt, setAttempt] = useState(0)
+  const current = useRef({ userId, saved })
+  current.current = { userId, saved }
+  const pending = useRef(new Set<string>())
+
   useEffect(() => {
-    if (!signedIn) return
-    q<{ listing_id: string }>('list_my_favorite_ids').then((rows) => setSaved(new Set(rows.map((r) => r.listing_id)))).catch(() => {})
-  }, [signedIn])
-  const toggle = useCallback(async (id: string) => {
-    if (!signedIn) { location.hash = '#/saved'; return }
-    const has = saved.has(id)
-    const next = new Set(saved)
-    if (has) next.delete(id); else next.add(id)
-    setSaved(next)
-    await x(has ? 'remove_favorite' : 'add_favorite', { listing_id: id })
-  }, [saved, signedIn])
-  return { saved, toggle, signedIn }
+    setSaved(new Set())
+    setError('')
+    pending.current = new Set()
+    if (!userId) return
+    let live = true
+    q<{ listing_id: string }>('list_my_favorite_ids')
+      .then((rows) => { if (live) setSaved(new Set(rows.map((r) => r.listing_id))) })
+      .catch((cause) => { if (live) setError(message(cause, 'Could not load your saved tradies.')) })
+    return () => { live = false }
+  }, [userId, attempt])
+
+  /** Resolves true once the server accepted the change; a failure rolls the heart back. */
+  const toggle = useCallback(async (id: string, has = current.current.saved.has(id)) => {
+    const owner = current.current.userId
+    if (!owner) { location.hash = '#/saved'; return false }
+    if (pending.current.has(id)) return false
+    const ids = pending.current
+    ids.add(id)
+    const flip = (on: boolean) => setSaved((prev) => {
+      const next = new Set(prev)
+      if (on) next.add(id); else next.delete(id)
+      return next
+    })
+    setError('')
+    flip(!has)
+    try {
+      await x(has ? 'remove_favorite' : 'add_favorite', { listing_id: id })
+      return true
+    } catch (cause) {
+      if (current.current.userId === owner) {
+        flip(has)
+        setError(message(cause, has ? 'Could not remove this from saved.' : 'Could not save this tradie.'))
+      }
+      return false
+    } finally {
+      ids.delete(id)
+    }
+  }, [])
+
+  const retry = useCallback(() => setAttempt((n) => n + 1), [])
+  return { saved, toggle, signedIn: !!userId, userId, error, retry }
 }
 
 export function Browse() {
@@ -29,7 +77,7 @@ export function Browse() {
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
-  const { saved, toggle, signedIn } = useSaved()
+  const { saved, toggle, signedIn, error: savedError, retry: retrySaved } = useSaved()
 
   const load = useCallback(async (before?: number) => {
     setBusy(true)
@@ -63,10 +111,11 @@ export function Browse() {
         <Button type="submit" variant="secondary">Filter</Button>
       </form>
       {error ? <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--danger)] p-3 text-sm text-[var(--danger)]"><span>{error}</span><Button variant="ghost" size="sm" onClick={() => load()}>Try again</Button></div> : null}
+      {savedError ? <SavedAlert error={savedError} onRetry={retrySaved} /> : null}
       {busy && rows.length === 0 ? <p className="mb-4 text-sm text-[var(--muted)]">Loading directory…</p> : null}
       {rows.length === 0 && !busy && !error ? <Empty title="No tradies listed yet" description="Tradies can sign in and add a service profile." /> : null}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {rows.map((l) => <ListingCard key={l.id} listing={l} saved={saved.has(l.id)} onToggleSave={signedIn ? () => toggle(l.id) : undefined} />)}
+        {rows.map((l) => <ListingCard key={l.id} listing={l} saved={saved.has(l.id)} onToggleSave={signedIn ? () => { void toggle(l.id) } : undefined} />)}
       </div>
       {!done ? <div className="mt-6 text-center"><Button variant="ghost" loading={busy} onClick={() => load(rows[rows.length - 1]?.created_at)}>Load more</Button></div> : null}
     </Section>
@@ -75,13 +124,32 @@ export function Browse() {
 
 export function Saved() {
   const [rows, setRows] = useState<Listing[] | null>(null)
-  const { saved, toggle } = useSaved()
-  useEffect(() => { q<Listing>('list_my_favorites').then(setRows) }, [saved.size])
+  const [error, setError] = useState('')
+  const [attempt, setAttempt] = useState(0)
+  const { toggle, userId, error: savedError, retry: retrySaved } = useSaved()
+
+  useEffect(() => { setRows(null) }, [userId])
+  useEffect(() => {
+    if (!userId) return
+    let live = true
+    setError('')
+    q<Listing>('list_my_favorites')
+      .then((next) => { if (live) setRows(next) })
+      .catch((cause) => { if (live) setError(message(cause, 'Could not load your saved tradies.')) })
+    return () => { live = false }
+  }, [userId, attempt])
+
+  const reload = useCallback(() => setAttempt((n) => n + 1), [])
+  const remove = async (id: string) => { if (await toggle(id, true)) reload() }
+
   return (
     <Section title="Saved">
-      {rows && rows.length === 0 ? <Empty title="Nothing saved" description="Tap the heart on a listing to keep it here." /> : null}
+      {error ? <SavedAlert error={error} onRetry={reload} /> : null}
+      {savedError && !error ? <SavedAlert error={savedError} onRetry={() => { retrySaved(); reload() }} /> : null}
+      {rows === null && !error ? <p className="mb-4 text-sm text-[var(--muted)]">Loading saved tradies…</p> : null}
+      {rows && rows.length === 0 && !error ? <Empty title="Nothing saved" description="Tap the heart on a listing to keep it here." /> : null}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {(rows ?? []).map((l) => <ListingCard key={l.id} listing={l} saved onToggleSave={() => toggle(l.id)} />)}
+        {(rows ?? []).map((l) => <ListingCard key={l.id} listing={l} saved onToggleSave={() => { void remove(l.id) }} />)}
       </div>
     </Section>
   )

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button, Modal } from '@proappstore/sdk/ui'
 import { app, pub, q, x, images, imageUrl, when, MAPS_ENABLED, REQUEST, type Listing, type Profile, type Review } from '../api'
 import { Empty, Field, Section, Stars, TextArea } from '../components'
-import { useSaved } from './Browse'
+import { SavedAlert, useSaved } from './Browse'
 
 export function ListingPage({ id }: { id: string }) {
   const [listing, setListing] = useState<Listing | null | undefined>(undefined)
@@ -17,7 +17,7 @@ export function ListingPage({ id }: { id: string }) {
   const [flash, setFlash] = useState('')
   const [profile, setProfile] = useState<Profile | null>(null)
   const [error, setError] = useState('')
-  const { saved, toggle, signedIn } = useSaved()
+  const { saved, toggle, signedIn, error: savedError, retry: retrySaved } = useSaved()
   const user = app.auth.user
 
   async function refresh() {
@@ -68,10 +68,11 @@ export function ListingPage({ id }: { id: string }) {
 
   return (
     <Section title={listing.title} action={signedIn && !mine ? (
-      <button type="button" aria-pressed={saved.has(id)} onClick={() => toggle(id)} className="text-2xl leading-none" style={{ color: saved.has(id) ? 'var(--accent)' : 'var(--muted)' }} aria-label={saved.has(id) ? 'Remove from saved' : 'Save'}>
+      <button type="button" aria-pressed={saved.has(id)} onClick={() => { void toggle(id) }} className="text-2xl leading-none" style={{ color: saved.has(id) ? 'var(--accent)' : 'var(--muted)' }} aria-label={saved.has(id) ? 'Remove from saved' : 'Save'}>
         {saved.has(id) ? '♥' : '♡'}
       </button>
     ) : null}>
+      {savedError ? <SavedAlert error={savedError} onRetry={retrySaved} /> : null}
       {photos.length ? (
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {photos.map((k) => <img key={k} src={imageUrl(k)} alt="" className="aspect-[4/3] w-full rounded-[var(--radius-sm)] object-cover" />)}
