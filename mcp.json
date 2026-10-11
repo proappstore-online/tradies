@@ -4,7 +4,7 @@
       "name": "list_listings",
       "description": "Public Tradies directory, newest first. Only active tradie profiles; filter by trade and broad service area, with keyset pagination. No personal data beyond the tradie's chosen display name and public service area.",
       "operation": "query",
-      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at FROM listings WHERE status = 'active' AND (:category IS NULL OR category = :category) AND (:location IS NULL OR lower(location) LIKE '%' || lower(:location) || '%') AND (:before IS NULL OR created_at < :before) ORDER BY created_at DESC LIMIT 24",
+      "sql": "SELECT id, owner_id, owner_name, status, title, description, category, location, lat, lng, images, created_at, updated_at FROM listings WHERE status = 'active' AND (:category IS NULL OR category = :category) AND (:location IS NULL OR lower(location) LIKE '%' || lower(:location) || '%') AND (:before IS NULL OR created_at < :before OR (created_at = :before AND id < :before_id)) ORDER BY created_at DESC, id DESC LIMIT 24",
       "params": {
         "category": {
           "type": "string",
@@ -19,6 +19,11 @@
         "before": {
           "type": "integer",
           "description": "created_at of the last row on the previous page (keyset cursor)",
+          "optional": true
+        },
+        "before_id": {
+          "type": "string",
+          "description": "id of the last row on the previous page; breaks created_at ties in the keyset cursor",
           "optional": true
         }
       },

@@ -184,6 +184,19 @@ call('set_listing_status', OWNER, { id: L, from: 'paused', status: 'active' })
 ok(call('search_listings', null, { q: 'OLIVE' }).length === 1, 'public search is case-insensitive')
 ok(call('list_listings', null, { category: 'plumber', location: 'north' }).length === 1, 'directory filters profiles by trade and broad service area')
 ok(call('list_listings', null, { category: 'electrician', location: 'north' }).length === 0, 'directory filter excludes another trade')
+{
+  // 30 profiles sharing one created_at straddle the 24-row page boundary; the (created_at, id) cursor must not skip or repeat any.
+  const insert = db.prepare("INSERT INTO listings (id, owner_id, owner_name, status, title, category, location, created_at, updated_at) VALUES (?, ?, 'Tied', 'active', ?, 'cleaner', 'Tiedtown', 1000, 1000)")
+  const tied = Array.from({ length: 30 }, (_, i) => `tied-${String(i).padStart(2, '0')}`)
+  for (const id of tied) insert.run(id, `gh:${id}`, `Tied ${id}`)
+  const first = call('list_listings', null, { category: 'cleaner', location: 'tiedtown' })
+  const last = first[first.length - 1]
+  const second = call('list_listings', null, { category: 'cleaner', location: 'tiedtown', before: last.created_at, before_id: last.id })
+  const seen = [...first, ...second].map((r) => r.id)
+  ok(first.length === 24 && second.length === 6 && new Set(seen).size === 30 && tied.every((id) => seen.includes(id)), 'directory keyset pages tied timestamps without skips or duplicates')
+  ok(call('list_listings', null, { category: 'cleaner', before: last.created_at }).length === 0, 'a created_at-only cursor keeps its old strict meaning')
+  db.exec("DELETE FROM listings WHERE id LIKE 'tied-%'")
+}
 
 // --- Requests -------------------------------------------------------------------------------
 ok(call('create_request', OWNER, { id: 'r-own', listing_id: L, requester_name: 'Olive' }) === 0, 'tradie cannot enquire on their own service')

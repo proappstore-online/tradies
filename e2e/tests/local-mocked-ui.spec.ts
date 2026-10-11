@@ -37,6 +37,7 @@ function seed() {
     listing: { id: 'listing-1', owner_id: users.tradie.id, owner_name: users.tradie.name, status: 'active', title: 'Taylor Plumbing', description: 'Licensed plumbing repairs and installations.', category: 'plumber', location: 'Melbourne', lat: null, lng: null, images: '[]', created_at: now, updated_at: now } as PublicListing,
     providerListings: [] as PublicListing[],
     delayDirectory: false,
+    directoryCalls: [] as Record<string, unknown>[],
     failJobs: false,
     failQuoteLoads: 0,
     failMessageLoads: 0,
@@ -122,9 +123,20 @@ async function mockedContext(browser: Browser, role: Role | null, store: Store):
     }
 
     switch (action) {
-      case 'list_listings':
+      case 'list_listings': {
+        store.directoryCalls.push({ ...params })
         if (store.delayDirectory) await new Promise((resolve) => setTimeout(resolve, 700))
-        return json(rows([store.listing, ...store.providerListings].filter((listing) => listing.status === 'active')))
+        // Mirrors the list_listings SQL: filters, compound (created_at, id) keyset, newest first, 24 per page.
+        const category = params.category == null ? null : String(params.category)
+        const area = params.location == null ? null : String(params.location).toLowerCase()
+        const before = params.before == null ? null : Number(params.before)
+        const beforeId = params.before_id == null ? null : String(params.before_id)
+        return json(rows([store.listing, ...store.providerListings]
+          .filter((listing) => listing.status === 'active' && (category === null || listing.category === category) && (area === null || listing.location.toLowerCase().includes(area)))
+          .filter((listing) => before === null || listing.created_at < before || (listing.created_at === before && beforeId !== null && listing.id < beforeId))
+          .sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+          .slice(0, 24)))
+      }
       case 'get_listing': return json(rows([store.listing, ...store.providerListings].filter((listing) => String(params.id) === listing.id && listing.status === 'active')))
       case 'list_reviews': return json(rows([]))
       case 'listing_stats': return json(rows([{ review_count: 0, avg_rating: null }]))
@@ -920,6 +932,52 @@ test('a slow saved-list response cannot overwrite a newer one', async ({ browser
   await customer.page.waitForTimeout(1500)
   await expect(customer.page.getByText('Nothing saved')).toBeVisible()
   await expect(customer.page.getByRole('heading', { name: 'Riley Electrical' })).toHaveCount(0)
+  await customer.context.close()
+})
+
+function directoryListing(id: string, created_at: number, category = 'plumber'): PublicListing {
+  return { id, owner_id: `owner-${id}`, owner_name: `Owner ${id}`, status: 'active', title: `Directory ${id}`, description: 'Seeded directory profile.', category, location: 'Melbourne', lat: null, lng: null, images: '[]', created_at, updated_at: created_at }
+}
+
+async function renderedDirectoryIds(page: Page) {
+  return (await page.getByRole('heading', { name: /^Directory listing-/ }).allTextContents()).map((title) => title.replace('Directory ', ''))
+}
+
+test('directory Load more pages through tied timestamps once each, keeps filters, and ignores a repeat click', async ({ browser }) => {
+  const store = seed()
+  store.listing.status = 'paused'
+  // 32 plumbers and 8 electricians share one created_at; two newer and two older rows straddle them.
+  for (let i = 0; i < 40; i++) store.providerListings.push(directoryListing(`listing-tied-${String(i).padStart(2, '0')}`, now, i % 5 === 4 ? 'electrician' : 'plumber'))
+  store.providerListings.push(directoryListing('listing-newer-a', now + 2), directoryListing('listing-newer-b', now + 1), directoryListing('listing-older-a', now - 1), directoryListing('listing-older-b', now - 2, 'electrician'))
+  const all = store.providerListings.map((listing) => listing.id)
+  const customer = await mockedContext(browser, 'customer', store)
+  const loadMore = customer.page.getByRole('button', { name: 'Load more' })
+  await customer.page.goto('/#/browse')
+  await expect(customer.page.getByRole('heading', { name: /^Directory listing-/ })).toHaveCount(24)
+
+  // A second click while the next page is in flight must not request (or append) it twice.
+  store.delayDirectory = true
+  await loadMore.click()
+  await loadMore.click({ force: true })
+  await expect(customer.page.getByRole('heading', { name: /^Directory listing-/ })).toHaveCount(44)
+  store.delayDirectory = false
+  expect(store.directoryCalls.filter((call) => call.before != null)).toHaveLength(1)
+  await expect(loadMore).toHaveCount(0)
+  const ids = await renderedDirectoryIds(customer.page)
+  expect(new Set(ids).size).toBe(ids.length)
+  expect([...ids].sort()).toEqual([...all].sort())
+  expect(store.directoryCalls.at(-1)).toMatchObject({ before: now, before_id: ids[23] })
+
+  await customer.page.getByLabel('Trade').selectOption('plumber')
+  await customer.page.getByRole('button', { name: 'Filter' }).click()
+  await expect(customer.page.getByRole('heading', { name: /^Directory listing-/ })).toHaveCount(24)
+  await loadMore.click()
+  await expect(loadMore).toHaveCount(0)
+  const plumbers = await renderedDirectoryIds(customer.page)
+  const expected = store.providerListings.filter((listing) => listing.category === 'plumber').map((listing) => listing.id)
+  expect(new Set(plumbers).size).toBe(plumbers.length)
+  expect([...plumbers].sort()).toEqual([...expected].sort())
+  expect(store.directoryCalls.at(-1)).toMatchObject({ category: 'plumber' })
   await customer.context.close()
 })
 

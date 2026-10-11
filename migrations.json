@@ -39,6 +39,10 @@
     {
       "name": "0010_work_conversations_and_agreements",
       "sql": "CREATE TABLE IF NOT EXISTS work_messages (id TEXT PRIMARY KEY, target_type TEXT NOT NULL CHECK (target_type IN ('job', 'request')), target_id TEXT NOT NULL, sender_id TEXT NOT NULL, sender_name TEXT NOT NULL DEFAULT '', recipient_id TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL, CHECK (sender_id != recipient_id)); CREATE UNIQUE INDEX IF NOT EXISTS idx_work_messages_idempotency ON work_messages (id, sender_id); CREATE INDEX IF NOT EXISTS idx_work_messages_thread ON work_messages (target_type, target_id, created_at); CREATE TABLE IF NOT EXISTS work_agreements (target_type TEXT NOT NULL CHECK (target_type IN ('job', 'request')), target_id TEXT NOT NULL, quote_id TEXT NOT NULL UNIQUE, customer_id TEXT NOT NULL, tradie_id TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('agreed', 'customer_completed', 'tradie_completed', 'completed')), agreed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER, PRIMARY KEY (target_type, target_id), CHECK (customer_id != tradie_id)); CREATE INDEX IF NOT EXISTS idx_work_agreements_customer ON work_agreements (customer_id, updated_at DESC); CREATE INDEX IF NOT EXISTS idx_work_agreements_tradie ON work_agreements (tradie_id, updated_at DESC)"
+    },
+    {
+      "name": "0011_listings_public_keyset",
+      "sql": "CREATE INDEX IF NOT EXISTS idx_listings_public_keyset ON listings (status, created_at DESC, id DESC)"
     }
   ]
 }

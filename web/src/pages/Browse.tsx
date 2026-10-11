@@ -79,21 +79,37 @@ export function Browse() {
   const [error, setError] = useState('')
   const { saved, toggle, signedIn, error: savedError, retry: retrySaved } = useSaved()
 
-  const load = useCallback(async (before?: number) => {
+  const generation = useRef(0)
+  const inFlight = useRef(false)
+
+  /** No cursor = a fresh first page; a cursor appends the next keyset page unless a newer load started. */
+  const load = useCallback(async (cursor?: { created_at: number; id: string }) => {
+    if (cursor && inFlight.current) return
+    const run = ++generation.current
+    inFlight.current = true
     setBusy(true)
     setError('')
     try {
       const page = await pub<Listing>('list_listings', {
         category: category || null,
         location: location.trim() || null,
-        before: before ?? null,
+        before: cursor?.created_at ?? null,
+        before_id: cursor?.id ?? null,
       })
-      setRows((prev) => (before ? [...prev, ...page] : page))
+      if (run !== generation.current) return
+      setRows((prev) => {
+        if (!cursor) return page
+        const seen = new Set(prev.map((r) => r.id))
+        return [...prev, ...page.filter((r) => !seen.has(r.id))]
+      })
       setDone(page.length < 24)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not load the directory.')
+      if (run === generation.current) setError(cause instanceof Error ? cause.message : 'Could not load the directory.')
     } finally {
-      setBusy(false)
+      if (run === generation.current) {
+        inFlight.current = false
+        setBusy(false)
+      }
     }
   }, [category, location])
 
@@ -117,7 +133,7 @@ export function Browse() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {rows.map((l) => <ListingCard key={l.id} listing={l} saved={saved.has(l.id)} onToggleSave={signedIn ? () => { void toggle(l.id) } : undefined} />)}
       </div>
-      {!done ? <div className="mt-6 text-center"><Button variant="ghost" loading={busy} onClick={() => load(rows[rows.length - 1]?.created_at)}>Load more</Button></div> : null}
+      {!done ? <div className="mt-6 text-center"><Button variant="ghost" loading={busy} onClick={() => { const last = rows[rows.length - 1]; if (last) void load({ created_at: last.created_at, id: last.id }) }}>Load more</Button></div> : null}
     </Section>
   )
 }
