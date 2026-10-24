@@ -789,6 +789,65 @@
         }
       },
       "requires_auth": true
+    },
+    {
+      "name": "public_listing_meta",
+      "description": "Public SEO metadata for an active tradie profile. Only the public title, summary, trade and broad service area; no account or contact data.",
+      "operation": "query",
+      "requires_auth": false,
+      "cache_ttl": 0,
+      "params": {
+        "id": {
+          "type": "string",
+          "description": "Public profile id"
+        }
+      },
+      "sql": "SELECT title || ' — Tradies' AS title, substr(CASE WHEN length(trim(description)) > 0 THEN trim(description) ELSE category || ' service profile.' END || CASE WHEN length(trim(location)) > 0 THEN ' Service area: ' || trim(location) || '.' ELSE '' END, 1, 500) AS description, NULL AS image_url FROM listings WHERE id = :id AND status = 'active' LIMIT 1"
+    },
+    {
+      "name": "public_job_meta",
+      "description": "Public SEO metadata for an open published job. Excludes customer identity, exact address, contact preferences, quotes and messages.",
+      "operation": "query",
+      "requires_auth": false,
+      "cache_ttl": 0,
+      "params": {
+        "id": {
+          "type": "string",
+          "description": "Public job id"
+        }
+      },
+      "sql": "SELECT title || ' — Tradies' AS title, substr(CASE WHEN length(trim(description)) > 0 THEN trim(description) ELSE category || ' job lead.' END || CASE WHEN length(trim(location)) > 0 THEN ' Service area: ' || trim(location) || '.' ELSE '' END, 1, 500) AS description, NULL AS image_url FROM jobs WHERE id = :id AND status = 'open' AND lifecycle = 'open' LIMIT 1"
+    },
+    {
+      "name": "public_sitemap_urls",
+      "description": "Keys-only sitemap of active public profiles and open published jobs, paged by path. LIMIT 500 is the documented keys-only sitemap exception.",
+      "operation": "query",
+      "requires_auth": false,
+      "cache_ttl": 0,
+      "params": {
+        "cursor": {
+          "type": "string",
+          "optional": true,
+          "default": "",
+          "description": "Last path from previous page"
+        }
+      },
+      "sql": "SELECT path, updated_at FROM (SELECT '/' AS path, NULL AS updated_at UNION ALL SELECT '/l/' || id AS path, updated_at FROM listings WHERE status = 'active' AND id NOT GLOB '*[^A-Za-z0-9_:-]*' AND length(id) BETWEEN 1 AND 200 UNION ALL SELECT '/jobs/' || id AS path, updated_at FROM jobs WHERE status = 'open' AND lifecycle = 'open' AND id NOT GLOB '*[^A-Za-z0-9_:-]*' AND length(id) BETWEEN 1 AND 200) WHERE path > :cursor ORDER BY path LIMIT 500"
     }
-  ]
+  ],
+  "page_meta": [
+    {
+      "path": "/l/:id",
+      "action": "public_listing_meta",
+      "param": "id",
+      "not_found": 404
+    },
+    {
+      "path": "/jobs/:id",
+      "action": "public_job_meta",
+      "param": "id",
+      "not_found": 404
+    }
+  ],
+  "sitemap": {"action": "public_sitemap_urls"}
 }

@@ -10,69 +10,32 @@ import { Conversations, Thread, WorkThread } from './pages/Messages'
 import { Settings } from './pages/Settings'
 import { JobDetail, Jobs } from './pages/Jobs'
 import { Quotes } from './pages/Quotes'
+import { parseRoute, type Route } from './routes'
 
 /**
- * Hash routes. Public: browse and listing detail (rendered without a session through
- * the public catalogue tools). Everything else needs the platform session.
+ * Public profiles/jobs have server-visible paths. Legacy hashes remain usable,
+ * including owner-only draft jobs; every private screen still needs a session.
  */
-export type Route =
-  | { name: 'browse' }
-  | { name: 'jobs' }
-  | { name: 'job'; id: string }
-  | { name: 'listing'; id: string }
-  | { name: 'saved' }
-  | { name: 'requests' }
-  | { name: 'quotes' }
-  | { name: 'inbox' }
-  | { name: 'mine' }
-  | { name: 'new' }
-  | { name: 'edit'; id: string }
-  | { name: 'messages' }
-  | { name: 'thread'; listingId: string; otherId: string }
-  | { name: 'workThread'; targetType: 'job' | 'request'; targetId: string; otherId: string }
-  | { name: 'settings' }
+export type { Route } from './routes'
 
 const PUBLIC = new Set<Route['name']>(['browse', 'listing', 'jobs', 'job'])
 
-function parseHash(): Route {
-  const h = location.hash
-  let m = h.match(/^#\/l\/([\w:-]+)$/)
-  if (m) return { name: 'listing', id: m[1]! }
-  m = h.match(/^#\/jobs\/([\w:-]+)$/)
-  if (m) return { name: 'job', id: m[1]! }
-  m = h.match(/^#\/mine\/([\w:-]+)\/edit$/)
-  if (m) return { name: 'edit', id: m[1]! }
-  m = h.match(/^#\/messages\/([\w:-]+)\/([\w:.@-]+)$/)
-  if (m) return { name: 'thread', listingId: m[1]!, otherId: m[2]! }
-  m = h.match(/^#\/work\/(job|request)\/([\w:-]+)\/([\w:.@-]+)$/)
-  if (m) return { name: 'workThread', targetType: m[1] as 'job' | 'request', targetId: m[2]!, otherId: m[3]! }
-  switch (h) {
-    case '#/jobs': return { name: 'jobs' }
-    case '#/saved': return { name: 'saved' }
-    case '#/requests': return { name: 'requests' }
-    case '#/quotes': return { name: 'quotes' }
-    case '#/inbox': return { name: 'inbox' }
-    case '#/mine': return { name: 'mine' }
-    case '#/mine/new': return { name: 'new' }
-    case '#/messages': return { name: 'messages' }
-    case '#/settings': return { name: 'settings' }
-    default: return { name: 'browse' }
-  }
-}
 
 export function useRoute(): Route {
-  const [route, setRoute] = useState<Route>(parseHash)
+  const [route, setRoute] = useState<Route>(() => parseRoute(location))
   useEffect(() => {
-    const onHash = () => setRoute(parseHash())
+    const onHash = () => setRoute(parseRoute(location))
     addEventListener('hashchange', onHash)
-    return () => removeEventListener('hashchange', onHash)
+    addEventListener('popstate', onHash)
+    return () => { removeEventListener('hashchange', onHash); removeEventListener('popstate', onHash) }
   }, [])
   useEffect(() => {
     const titles: Record<Route['name'], string> = {
       browse: 'Directory', jobs: 'Jobs', job: 'Job', listing: 'Tradie', saved: 'Saved', requests: `My ${REQUEST.plural}`, quotes: 'Quotes', inbox: 'Inbox',
       mine: 'My trade profile', new: 'Add service', edit: 'Edit service', messages: 'Inbox', thread: 'Conversation', workThread: 'Work conversation', settings: 'Settings',
     }
-    document.title = `${titles[route.name]} — Tradies`
+    // Record components retain server-rendered metadata and use the loaded public title.
+    if (route.name !== 'job' && route.name !== 'listing') document.title = `${titles[route.name]} — Tradies`
     window.scrollTo(0, 0)
   }, [route])
   return route
@@ -157,8 +120,8 @@ function PublicShell({ children }: { children: ReactNode }) {
 /** The signed-in screens. ProShell renders these as its main navigation (<nav aria-label="Main">). */
 function navFor(role: Role): NavItem[] {
   return [
-    { label: 'Directory', href: '#/' },
-    { label: 'Jobs', href: '#/jobs' },
+    { label: 'Directory', href: '/' },
+    { label: 'Jobs', href: '/#/jobs' },
     { label: 'Quotes', href: '#/quotes' },
     { label: 'Inbox', href: '#/messages' },
     { label: 'Saved', href: '#/saved' },
@@ -173,15 +136,15 @@ function Header({ right }: { right: ReactNode }) {
     <header className="sticky top-0 z-10 border-b border-[var(--line)] bg-[var(--panel-strong)] backdrop-blur">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:rounded focus:bg-[var(--paper)] focus:px-2 focus:py-1">Skip to content</a>
       <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3 sm:px-6">
-        <a href="#/" className="display-font text-lg font-bold text-[var(--ink)]">Tradies</a>
-        <HashNav items={[{ label: 'Directory', href: '#/' }, { label: 'Jobs', href: '#/jobs' }]} />
+        <a href="/" className="display-font text-lg font-bold text-[var(--ink)]">Tradies</a>
+        <HashNav items={[{ label: 'Directory', href: '/' }, { label: 'Jobs', href: '/#/jobs' }]} />
         <div className="flex items-center gap-2">{right}</div>
       </div>
     </header>
   )
 }
 
-/** ProShell's NavBar, marking the current screen: this app routes by hash, the NavBar by default by path. */
+/** Match both public paths and existing private hashes to the current navigation item. */
 function HashNav({ items }: { items: NavItem[] }) {
   const [hash, setHash] = useState(currentHash)
   useEffect(() => {
@@ -193,7 +156,10 @@ function HashNav({ items }: { items: NavItem[] }) {
 }
 
 function currentHash(): string {
-  return (location.hash || '#/').split('?')[0]!
+  const route = parseRoute(location)
+  if (route.name === 'browse' || route.name === 'listing') return '/'
+  if (route.name === 'jobs' || route.name === 'job') return '/#/jobs'
+  return location.hash.split('?')[0]!
 }
 
 function ProfileSetup({ onDone }: { onDone: () => void }) {

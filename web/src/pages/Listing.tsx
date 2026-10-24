@@ -19,6 +19,7 @@ export function ListingPage({ id }: { id: string }) {
   const [error, setError] = useState('')
   const { saved, toggle, signedIn, error: savedError, retry: retrySaved } = useSaved()
   const user = app.auth.user
+  useEffect(() => { if (listing) document.title = `${listing.title} — Tradies` }, [listing])
 
   async function refresh() {
     const [rows, rv, st] = await Promise.all([

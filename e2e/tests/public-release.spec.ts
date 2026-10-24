@@ -41,15 +41,28 @@ test('public jobs remain usable on a narrow mobile viewport', async ({ page }) =
 test('signed-out public job details keep private address and contact fields out of the mobile UI', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/jobs')
-  const firstJob = page.locator('a[href^="#/jobs/"]').first()
+  const firstJob = page.locator('a[href^="/jobs/"]').first()
   if (!await firstJob.count()) {
     test.skip(true, 'No open public job is currently available for a read-only release smoke.')
     return
   }
   const href = await firstJob.getAttribute('href')
-  await page.goto(`/${href}`)
+  await page.goto(href!)
   await expect(page.locator('input[aria-label="Exact address"], input[aria-label="Contact preference"]')).toHaveCount(0)
   await expect(page.getByText('Private details — visible only to you')).toHaveCount(0)
   await expect(page.getByText(/exact address and contact preferences are kept private/i)).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+})
+
+test('unavailable public records are real noindex 404s, including HEAD', async ({ request }) => {
+  for (const prefix of ['l', 'jobs']) {
+    const path = `/${prefix}/seo-audit-missing-record-20261024`
+    const get = await request.get(path)
+    expect(get.status()).toBe(404)
+    expect(get.headers()['x-robots-tag']).toContain('noindex')
+    expect(await get.text()).toContain('Page not found')
+    const head = await request.head(path)
+    expect(head.status()).toBe(404)
+    expect(await head.body()).toHaveLength(0)
+  }
 })

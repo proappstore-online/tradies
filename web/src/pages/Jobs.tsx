@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Button, Input } from '@proappstore/sdk/ui'
 import { app, pub, q, x, CATEGORIES, type Job, type Profile } from '../api'
+import { jobPath } from '../routes'
 import { Empty, Field, Section, Status, TextArea } from '../components'
 import { CustomerQuoteComparison, QuoteForm } from './Quotes'
 
@@ -57,6 +58,7 @@ export function JobDetail({ id }: { id: string }) {
   }, [id])
   useEffect(() => { load() }, [load])
   const job = ownJob ?? publicJob
+  useEffect(() => { if (job) document.title = `${job.title} — Tradies` }, [job])
   async function transition(to: 'open' | 'closed') {
     if (!ownJob) return
     setSaving(true); setError('')
@@ -65,7 +67,7 @@ export function JobDetail({ id }: { id: string }) {
   }
   if (publicJob === undefined || ownJob === undefined || profile === undefined) return <Section title="Job"><p className="text-sm text-[var(--muted)]">Loading job…</p></Section>
   if (!job) return <Section title="Job"><Empty title="This job is not available" description="It may be closed, saved as a draft, or no longer accepting leads." /></Section>
-  return <Section title={job.title} action={<a href="#/jobs" className="text-sm font-semibold text-[var(--accent)]">← All jobs</a>}>
+  return <Section title={job.title} action={<a href="/#/jobs" className="text-sm font-semibold text-[var(--accent)]">← All jobs</a>}>
     {error ? <ErrorNotice error={error} retry={load} /> : null}
     {editing && ownJob ? <JobEditor key={`${ownJob.id}-${ownJob.updated_at}`} job={ownJob} onDone={async () => { setEditing(false); await load() }} onCancel={() => setEditing(false)} /> : null}
     <article className="max-w-2xl rounded-[var(--radius)] border border-[var(--line)] bg-[var(--panel-strong)] p-5">
@@ -85,10 +87,10 @@ export function JobDetail({ id }: { id: string }) {
 }
 
 function MyJobs({ jobs }: { jobs: Job[] }) {
-  return <div className="mb-7"><h2 className="display-font mb-3 text-xl font-semibold text-[var(--ink)]">My jobs</h2><ul className="space-y-2">{jobs.map((job) => <li key={job.id} className="flex flex-col gap-2 rounded-[var(--radius-sm)] border border-[var(--line)] p-3 sm:flex-row sm:items-center sm:justify-between"><div><a href={`#/jobs/${job.id}`} className="font-semibold text-[var(--ink)] hover:text-[var(--accent)]">{job.title}</a><p className="text-xs text-[var(--muted)]">{[job.category, job.location].filter(Boolean).join(' · ')}</p></div><Status value={job.lifecycle} /></li>)}</ul></div>
+  return <div className="mb-7"><h2 className="display-font mb-3 text-xl font-semibold text-[var(--ink)]">My jobs</h2><ul className="space-y-2">{jobs.map((job) => <li key={job.id} className="flex flex-col gap-2 rounded-[var(--radius-sm)] border border-[var(--line)] p-3 sm:flex-row sm:items-center sm:justify-between"><div><a href={`/#/jobs/${job.id}`} className="font-semibold text-[var(--ink)] hover:text-[var(--accent)]">{job.title}</a><p className="text-xs text-[var(--muted)]">{[job.category, job.location].filter(Boolean).join(' · ')}</p></div><Status value={job.lifecycle} /></li>)}</ul></div>
 }
 function JobCard({ job }: { job: Job }) {
-  return <li className="rounded-[var(--radius-sm)] border border-[var(--line)] bg-[var(--panel-strong)] p-4"><a href={`#/jobs/${job.id}`} className="block"><div className="flex items-start justify-between gap-3"><h3 className="font-semibold text-[var(--ink)]">{job.title}</h3><Status value="open" /></div><p className="mt-1 text-xs text-[var(--muted)]">{[job.category, job.location].filter(Boolean).join(' · ')}</p><p className="mt-3 line-clamp-3 whitespace-pre-wrap text-sm text-[var(--ink)]">{job.description}</p><span className="mt-4 block text-sm font-semibold text-[var(--accent)]">View job →</span></a></li>
+  return <li className="rounded-[var(--radius-sm)] border border-[var(--line)] bg-[var(--panel-strong)] p-4"><a href={jobPath(job.id)} className="block"><div className="flex items-start justify-between gap-3"><h3 className="font-semibold text-[var(--ink)]">{job.title}</h3><Status value="open" /></div><p className="mt-1 text-xs text-[var(--muted)]">{[job.category, job.location].filter(Boolean).join(' · ')}</p><p className="mt-3 line-clamp-3 whitespace-pre-wrap text-sm text-[var(--ink)]">{job.description}</p><span className="mt-4 block text-sm font-semibold text-[var(--accent)]">View job →</span></a></li>
 }
 function JobEditor({ job, onDone, onCancel }: { job?: Job; onDone: () => Promise<void>; onCancel: () => void }) {
   const [title, setTitle] = useState(job?.title ?? ''); const [description, setDescription] = useState(job?.description ?? '')

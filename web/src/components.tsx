@@ -1,5 +1,6 @@
 import type { ReactNode, TextareaHTMLAttributes } from 'react'
 import { Card } from '@proappstore/sdk/ui'
+import { listingPath } from './routes'
 import { images, imageUrl, type Listing } from './api'
 
 export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
@@ -58,7 +59,7 @@ export function ListingCard({ listing, saved, onToggleSave }: { listing: Listing
   const [cover] = images(listing)
   return (
     <Card padding="0">
-      <a href={`#/l/${listing.id}`} className="block">
+      <a href={listingPath(listing.id)} className="block">
         <div className="aspect-[4/3] w-full overflow-hidden rounded-t-[var(--radius)] bg-[var(--paper-deep)]">
           {cover ? <img src={imageUrl(cover)} alt="" className="h-full w-full object-cover" loading="lazy" /> : null}
         </div>

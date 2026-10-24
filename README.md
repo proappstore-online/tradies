@@ -91,3 +91,17 @@ journey coverage.
 ## License
 
 MIT
+
+## Public discovery
+
+Active public tradie profiles use `/l/<id>` and published open jobs use
+`/jobs/<id>`. Their declared metadata queries expose only the existing public
+title, description, trade and broad service area. A keys-only paginated sitemap
+advertises active/open records; drafts, closed jobs and inactive profiles are
+excluded. Successful absent public queries opt into the PAS host's noindex 404
+contract, while upstream failures keep the platform fallback.
+
+Legacy hash links still work. Customer-owned draft/closed jobs retain hash
+navigation so owner workflows remain available without publishing those records.
+No enquiry, quote, message, exact address, contact preference or account identity
+is added to metadata or sitemap responses.
