@@ -795,8 +795,7 @@
       "description": "Public SEO metadata for an active tradie profile. Only the public title, summary, trade and broad service area; no account or contact data.",
       "operation": "query",
       "requires_auth": false,
-      "cache_ttl": 0,
-      "params": {
+        "params": {
         "id": {
           "type": "string",
           "description": "Public profile id"
@@ -809,8 +808,7 @@
       "description": "Public SEO metadata for an open published job. Excludes customer identity, exact address, contact preferences, quotes and messages.",
       "operation": "query",
       "requires_auth": false,
-      "cache_ttl": 0,
-      "params": {
+        "params": {
         "id": {
           "type": "string",
           "description": "Public job id"
@@ -823,8 +821,7 @@
       "description": "Keys-only sitemap of active public profiles and open published jobs, paged by path. LIMIT 500 is the documented keys-only sitemap exception.",
       "operation": "query",
       "requires_auth": false,
-      "cache_ttl": 0,
-      "params": {
+        "params": {
         "cursor": {
           "type": "string",
           "optional": true,
